@@ -21,12 +21,13 @@ export const MOCK_ENQUIRIES = [
     enquiryType: 'Coronary Angiogram Inquiry',
     priority: 'HIGH',
     status: 'SURGERY_FIXED',
+    disposition: 'APPOINTMENT_FIXED',
     assignedSLM: 'Vijay Kumar (SLM Cardio)',
     timeAgo: '12 mins ago',
     audioDuration: '2m 14s',
-    recordingUrl: 'wav_8801.wav',
-    notes: 'Patient reports mild exertional chest pain. Discussed Dr. Prashanth’s Thursday OT slot. Fixed procedure appointment for Thursday 10:00 AM.',
-    nextFollowup: '2026-08-06 09:00 AM'
+    recordingUrl: 'wav_8801.wav', // Available voice path
+    remarks: 'Patient reports mild exertional chest pain. Fixed procedure appointment for Thursday 10:00 AM.',
+    fcmBypassed: false
   },
   {
     id: 'ENQ-2026-8802',
@@ -37,18 +38,39 @@ export const MOCK_ENQUIRIES = [
     branch: 'Chetpet',
     department: 'IVF & Fertility',
     doctorName: 'Dr. Geetha Haripriya, Lead Fertility Specialist',
-    enquiryType: 'IVF Treatment Consultation',
+    enquiryType: 'General IVF Pricing & Package Inquiry', // Broad SLM query type
     priority: 'URGENT',
     status: 'APPOINTMENT_CONFIRMED',
+    disposition: 'INFO_GIVEN',
     assignedSLM: 'Anitha Ramesh (SLM Fertility)',
     timeAgo: '28 mins ago',
-    audioDuration: '4m 05s',
-    recordingUrl: 'wav_8802.wav',
-    notes: 'Enquired about 3rd cycle package tariffs. Scheduled in-person counseling at Chetpet IVF clinic on Friday 11:30 AM.',
-    nextFollowup: '2026-08-05 04:00 PM'
+    audioDuration: null,
+    recordingUrl: null, // Nullable voice path (audio sync pending)
+    remarks: 'Shared 3rd cycle tariff estimate via WhatsApp. Scheduled in-person counseling on Friday 11:30 AM.',
+    fcmBypassed: false
   },
   {
     id: 'ENQ-2026-8803',
+    patientName: 'Srinivasan K.',
+    phone: '+91 98841 00112',
+    age: 52,
+    gender: 'Male',
+    branch: 'Velachery',
+    department: 'General Services',
+    doctorName: 'N/A (Agent FCR)',
+    enquiryType: 'OPD Timing & Specialist Availability Request', // General Info Request
+    priority: 'MEDIUM',
+    status: 'CLOSED', // First-Contact Resolution (FCR)
+    disposition: 'INFO_GIVEN',
+    assignedSLM: 'None (FCR Agent Resolved)',
+    timeAgo: '35 mins ago',
+    audioDuration: null,
+    recordingUrl: null,
+    remarks: 'Call Center Agent provided OPD timings for Velachery branch over phone. Query resolved immediately.',
+    fcmBypassed: true // FCM push suppressed
+  },
+  {
+    id: 'ENQ-2026-8804',
     patientName: 'Subramanian V.',
     phone: '+91 98840 98765',
     age: 62,
@@ -56,33 +78,15 @@ export const MOCK_ENQUIRIES = [
     branch: 'Velachery',
     department: 'Orthopedics',
     doctorName: 'Dr. R. Balaji, Knee Replacement Specialist',
-    enquiryType: 'Bilateral Knee Replacement Surgery',
+    enquiryType: 'Bilateral Knee Surgery Estimate',
     priority: 'HIGH',
     status: 'DOCTOR_CONSULTED',
+    disposition: 'ESTIMATE_PROVIDED',
     assignedSLM: 'Suresh Babu (SLM Ortho)',
     timeAgo: '45 mins ago',
     audioDuration: '3m 40s',
     recordingUrl: 'wav_8803.wav',
-    notes: 'Reviewed X-ray scans with Dr. Balaji. Shared surgical package cost estimate. Patient discussing insurance coverage with family.',
-    nextFollowup: '2026-08-04 11:00 AM'
-  },
-  {
-    id: 'ENQ-2026-8804',
-    patientName: 'Deepa Lakshmi',
-    phone: '+91 97900 11223',
-    age: 29,
-    gender: 'Female',
-    branch: 'Gummidipoondi',
-    department: 'Obstetrics & Gynecology',
-    doctorName: 'Dr. N. Kausalya, Sr. Gynecologist',
-    enquiryType: 'Maternity Package & Delivery',
-    priority: 'MEDIUM',
-    status: 'CONTACTED',
-    assignedSLM: 'Priya Dharshini (SLM Gynae)',
-    timeAgo: '1 hour ago',
-    audioDuration: '1m 55s',
-    recordingUrl: 'wav_8804.wav',
-    notes: 'Spoke with patient regarding luxury suite room booking. Sent hospital brochure on WhatsApp.',
-    nextFollowup: '2026-08-04 03:00 PM'
+    remarks: 'Reviewed X-ray scans with Dr. Balaji. Shared package estimate.',
+    fcmBypassed: false
   }
 ];

@@ -12,7 +12,24 @@ This document defines the production architecture for transforming the existing 
 * **appointments**: OPD and surgical booking lifecycle.
 * **messages**: SMS and WhatsApp communication history.
 
-## 3. Hospital Branches & Routing Matrix
+## 3. Workflow Rule Specifications
+
+### A. Nullable Voice Paths (`recording_path`)
+* In `enquiries` and `call_history`, `recording_path` is specified as `Optional[str] = None` (nullable).
+* Call Centre Agents push text payloads immediately without blocking for DB2 audio file sync.
+* The frontend/mobile app renders an "Audio Pending / Unavailable" indicator when `recording_path` is null.
+
+### B. First-Contact Resolution (FCR) & FCM Push Suppression
+* When an enquiry is created with status `CLOSED` or `CONVERTED` (e.g. disposition `INFO_GIVEN` or `COMPLAINT_RESOLVED`), the backend `send_fcm_notification` dispatch function is conditionally **suppressed**.
+* The enquiry bypasses the SLM active queue entirely while remaining logged in database history for reporting.
+
+### C. Mandatory Closing Remarks Validation
+* Backend APIs validate that `remarks` is present, non-empty, and descriptive whenever an enquiry is updated or saved with a resolving status (`CLOSED` or `CONVERTED`).
+
+### D. Broad SLM Query Handling Scope
+* The `enquiry_type` taxonomy covers all patient queries: `GENERAL_PRICING`, `PACKAGE_INFO`, `INFO_REQUEST`, `DOCTOR_APPOINTMENT`, `SURGERY_INQUIRY`, and `COMPLAINT`.
+
+## 4. Hospital Branches & Routing Matrix
 1. **Kolathur** (Primary Call Center Hub & Multispecialty Hospital)
 2. **Chetpet** (Multispecialty Hospital)
 3. **Velachery** (Multispecialty Hospital)
@@ -21,7 +38,7 @@ This document defines the production architecture for transforming the existing 
 6. **Navalur** (Upcoming Branch)
 7. **IVF Clinics Network** (Fertility Specialty Centers)
 
-## 4. Backend Service & Push Pipeline
-* **FastAPI Service**: Provides JWT authentication, enquiry lifecycle management, recording proxy, and FCM push notifications.
+## 5. Backend Service & Push Pipeline
+* **FastAPI Service**: Provides JWT authentication, enquiry lifecycle management, recording proxy, and conditional FCM push notifications.
 * **Database**: PostgreSQL with Alembic migrations.
 * **Push Gateway**: Firebase Cloud Messaging (FCM) + Redis Celery Workers.

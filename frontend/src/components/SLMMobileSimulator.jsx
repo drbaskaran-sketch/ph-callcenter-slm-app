@@ -1,18 +1,27 @@
 import React, { useState } from 'react';
-import { Phone, MessageSquare, Calendar, UserCheck, Play, Pause, Bell, Clock, Building, Shield, ChevronRight } from 'lucide-react';
+import { Phone, MessageSquare, UserCheck, Play, Pause, Bell, Clock, Building, AlertCircle, CheckCircle } from 'lucide-react';
 import { MOCK_ENQUIRIES } from '../data/mockData';
 
 export default function SLMMobileSimulator() {
   const [selectedEnquiry, setSelectedEnquiry] = useState(MOCK_ENQUIRIES[0]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [status, setStatus] = useState(selectedEnquiry.status);
-  const [feedbackNote, setFeedbackNote] = useState('');
-  const [showToast, setShowToast] = useState(false);
+  const [remarks, setRemarks] = useState(selectedEnquiry.remarks || '');
+  const [toastMessage, setToastMessage] = useState(null);
+  const [errorMessage, setErrorMessage] = useState(null);
 
   const handleUpdateStatus = (newStatus) => {
+    // Mandatory Remarks Check for CLOSED or CONVERTED
+    if ((newStatus === 'CLOSED' || newStatus === 'CONVERTED') && (!remarks || !remarks.trim())) {
+      setErrorMessage("Mandatory remarks required before closing or converting an enquiry!");
+      setTimeout(() => setErrorMessage(null), 4000);
+      return;
+    }
+
     setStatus(newStatus);
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
+    setErrorMessage(null);
+    setToastMessage(`✓ Status Updated: ${newStatus}`);
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
   return (
@@ -23,12 +32,12 @@ export default function SLMMobileSimulator() {
         <div>
           <div className="flex items-center gap-2">
             <span className="bg-teal-500/20 text-teal-300 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-teal-500/30">
-              Live Simulator
+              Updated Workflow Simulator
             </span>
             <h2 className="text-lg font-bold text-white">Service Line Manager (SLM) Mobile App</h2>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Simulating real-time lead dispatch from Kolathur Call Center hub to Department SLMs across Chetpet, Velachery, Gummidipoondi, Guduvanchery & IVF Clinics.
+            Handles broad queries (pricing, package, complaints), nullable audio sync, FCR push bypass, and mandatory remarks.
           </p>
         </div>
         <button className="bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow-md shadow-teal-950 flex items-center gap-2">
@@ -53,6 +62,8 @@ export default function SLMMobileSimulator() {
                 onClick={() => {
                   setSelectedEnquiry(item);
                   setStatus(item.status);
+                  setRemarks(item.remarks || '');
+                  setErrorMessage(null);
                 }}
                 className={`p-4 rounded-xl border transition-all cursor-pointer ${
                   selectedEnquiry.id === item.id
@@ -62,13 +73,20 @@ export default function SLMMobileSimulator() {
               >
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-bold text-teal-400">{item.id}</span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    item.priority === 'URGENT' ? 'bg-red-950 text-red-300 border border-red-800' :
-                    item.priority === 'HIGH' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
-                    'bg-blue-950 text-blue-300 border border-blue-800'
-                  }`}>
-                    {item.priority}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {item.fcmBypassed && (
+                      <span className="text-[9px] font-extrabold bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded-full">
+                        FCR (Agent Resolved)
+                      </span>
+                    )}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      item.priority === 'URGENT' ? 'bg-red-950 text-red-300 border border-red-800' :
+                      item.priority === 'HIGH' ? 'bg-amber-950 text-amber-300 border border-amber-800' :
+                      'bg-blue-950 text-blue-300 border border-blue-800'
+                    }`}>
+                      {item.priority}
+                    </span>
+                  </div>
                 </div>
 
                 <h4 className="text-sm font-bold text-white">{item.patientName} ({item.age} yrs, {item.gender})</h4>
@@ -98,12 +116,17 @@ export default function SLMMobileSimulator() {
             </div>
 
             {/* Mobile App Screen Content */}
-            <div className="bg-slate-900 rounded-[36px] pt-7 pb-4 px-4 min-h-[640px] flex flex-col justify-between text-slate-100 relative">
+            <div className="bg-slate-900 rounded-[36px] pt-7 pb-4 px-4 min-h-[660px] flex flex-col justify-between text-slate-100 relative">
               
-              {/* Toast Notification */}
-              {showToast && (
+              {/* Toast & Error Banners */}
+              {toastMessage && (
                 <div className="absolute top-8 left-4 right-4 bg-teal-600 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-lg z-40 text-center animate-bounce">
-                  ✓ Status Updated: {status}
+                  {toastMessage}
+                </div>
+              )}
+              {errorMessage && (
+                <div className="absolute top-8 left-4 right-4 bg-red-900 text-red-100 text-[11px] font-bold py-2 px-3 rounded-xl shadow-lg z-40 text-center border border-red-700">
+                  ⚠️ {errorMessage}
                 </div>
               )}
 
@@ -117,7 +140,7 @@ export default function SLMMobileSimulator() {
                     <span className="text-xs font-bold text-white">Prashanth SLM App</span>
                   </div>
                   <span className="text-[10px] bg-teal-950 text-teal-300 font-semibold px-2 py-0.5 rounded-full border border-teal-800">
-                    Online
+                    Broad Scope
                   </span>
                 </div>
               </div>
@@ -125,6 +148,14 @@ export default function SLMMobileSimulator() {
               {/* Active Patient Card Detail */}
               <div className="space-y-3 flex-1 overflow-y-auto pr-1">
                 
+                {/* FCR Alert Badge if Agent Resolved */}
+                {selectedEnquiry.fcmBypassed && (
+                  <div className="bg-purple-950/80 border border-purple-800/80 p-2.5 rounded-xl text-purple-200 text-[11px] flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-purple-400 shrink-0" />
+                    <span><b>FCR Bypass:</b> Resolved on call by Agent. Suppressed FCM alert.</span>
+                  </div>
+                )}
+
                 {/* Patient Header */}
                 <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
                   <div className="flex items-center justify-between mb-1">
@@ -136,47 +167,62 @@ export default function SLMMobileSimulator() {
                   <p className="text-xs font-medium text-teal-300 mt-1">{selectedEnquiry.enquiryType}</p>
                 </div>
 
-                {/* Call Recording Streaming Player */}
+                {/* Nullable Voice Path Audio Component */}
                 <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
                       <Phone className="w-3 h-3 text-teal-400" />
                       XTEND Call Recording
                     </span>
-                    <span className="text-[10px] text-slate-500">{selectedEnquiry.audioDuration}</span>
+                    <span className="text-[10px] text-slate-500">
+                      {selectedEnquiry.recordingUrl ? selectedEnquiry.audioDuration : 'Audio Pending'}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => setIsPlaying(!isPlaying)}
-                      className="w-8 h-8 rounded-full bg-teal-600 hover:bg-teal-500 flex items-center justify-center text-white transition-all"
-                    >
-                      {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
-                    </button>
-                    <div className="flex-1 bg-slate-800 h-2 rounded-full overflow-hidden">
-                      <div className={`h-full bg-teal-400 transition-all ${isPlaying ? 'w-3/4 animate-pulse' : 'w-1/4'}`}></div>
+                  
+                  {selectedEnquiry.recordingUrl ? (
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setIsPlaying(!isPlaying)}
+                        className="w-8 h-8 rounded-full bg-teal-600 hover:bg-teal-500 flex items-center justify-center text-white transition-all"
+                      >
+                        {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+                      </button>
+                      <div className="flex-1 bg-slate-800 h-2 rounded-full overflow-hidden">
+                        <div className={`h-full bg-teal-400 transition-all ${isPlaying ? 'w-3/4 animate-pulse' : 'w-1/4'}`}></div>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="bg-slate-900/90 border border-amber-900/40 p-2.5 rounded-xl text-[11px] text-amber-300 flex items-center gap-2">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Audio sync pending from DB2. Processing text payload.</span>
+                    </div>
+                  )}
                 </div>
 
-                {/* Doctor Slot & Notes */}
+                {/* Doctor / Treatment & Mandatory Remarks Input */}
                 <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-2">
                   <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
                     <UserCheck className="w-3 h-3 text-teal-400" />
-                    Doctor & Treatment Plan
+                    Doctor & Mandatory Remarks
                   </span>
                   <p className="text-xs text-white font-semibold">{selectedEnquiry.doctorName}</p>
-                  <p className="text-[11px] text-slate-400 leading-relaxed bg-slate-900 p-2 rounded-lg border border-slate-800">
-                    "{selectedEnquiry.notes}"
-                  </p>
+                  
+                  <textarea
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    placeholder="Enter mandatory resolution remarks prior to archiving..."
+                    rows={2}
+                    className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 p-2 rounded-lg focus:outline-none focus:border-teal-500 resize-none"
+                  />
                 </div>
 
                 {/* Status Picker */}
                 <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-2">
                   <label className="text-[11px] font-bold text-slate-300 block">
-                    Update Enquiry Status:
+                    Update Status (Mandatory Remarks for Closed):
                   </label>
                   <div className="grid grid-cols-2 gap-1.5">
-                    {['CONTACTED', 'DOCTOR_CONSULTED', 'SURGERY_FIXED', 'APPOINTMENT_CONFIRMED'].map((st) => (
+                    {['CONTACTED', 'DOCTOR_CONSULTED', 'CONVERTED', 'CLOSED'].map((st) => (
                       <button
                         key={st}
                         onClick={() => handleUpdateStatus(st)}
