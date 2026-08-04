@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { PRASHANTH_BRANCHES } from '../data/mockData';
-import { Building2, MapPin, Clock, Activity, PlusCircle, X, CheckCircle2 } from 'lucide-react';
+import { Building2, MapPin, Clock, Activity, PlusCircle, Trash2, X, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 const API_BASE = '/api/v1';
 
 export default function BranchMatrix() {
   const [branches, setBranches] = useState(PRASHANTH_BRANCHES);
-  const [showModal, setShowModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
   const [newCity, setNewCity] = useState('');
@@ -56,12 +57,12 @@ export default function BranchMatrix() {
         setBranches(prev => [...prev, data.branch]);
         setSuccessMsg(`Branch ${data.branch.name} added successfully!`);
         setTimeout(() => {
-          setShowModal(false);
+          setShowAddModal(false);
           setSuccessMsg('');
           setNewCode('');
           setNewName('');
           setNewCity('');
-        }, 1500);
+        }, 1200);
       } else {
         const err = await res.json();
         setErrorMsg(err.detail || 'Failed to add branch');
@@ -80,166 +81,222 @@ export default function BranchMatrix() {
       setBranches(prev => [...prev, b]);
       setSuccessMsg(`Branch ${b.name} added locally!`);
       setTimeout(() => {
-        setShowModal(false);
+        setShowAddModal(false);
         setSuccessMsg('');
         setNewCode('');
         setNewName('');
         setNewCity('');
-      }, 1500);
+      }, 1200);
     }
+  };
+
+  const handleDeleteBranch = async (idToDelete, branchName) => {
+    try {
+      await fetch(`${API_BASE}/branches/${idToDelete}`, {
+        method: 'DELETE'
+      });
+    } catch (e) {
+      console.log('Local branch delete fallback');
+    }
+
+    setBranches(prev => prev.filter(b => b.id !== idToDelete));
+    setDeleteConfirmId(null);
+    setSuccessMsg(`Branch ${branchName} removed successfully.`);
+    setTimeout(() => setSuccessMsg(''), 3000);
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
       
-      {/* Banner */}
-      <div className="bg-slate-900/90 border border-slate-800 p-5 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
+      {/* Top Banner */}
+      <div className="bg-white border border-slate-200 p-5 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
         <div>
-          <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-teal-400" />
+          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-teal-700" />
             Prashanth Hospitals Multi-Branch Infrastructure & Expansion Matrix
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Dynamic tenant architecture supporting Kolathur Call Center Hub, active hospital branches, upcoming branches, and IVF clinics network.
+          <p className="text-xs text-slate-500 mt-1">
+            Dynamic tenant architecture supporting Kolathur Call Center Hub, active hospital branches, upcoming locations, and IVF clinics.
           </p>
         </div>
+
         <button
           onClick={() => {
-            setShowModal(true);
+            setShowAddModal(true);
             setErrorMsg('');
             setSuccessMsg('');
           }}
-          className="bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow-md flex items-center gap-1.5"
+          className="bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-sm flex items-center gap-1.5 shrink-0"
         >
           <PlusCircle className="w-4 h-4" />
           <span>Add New Branch</span>
         </button>
       </div>
 
+      {successMsg && !showAddModal && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-xl font-bold flex items-center gap-2 shadow-xs">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
       {/* Grid of Branches */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         {branches.map((branch) => (
           <div
             key={branch.id}
-            className={`p-5 rounded-2xl border transition-all ${
+            className={`p-5 rounded-2xl border transition-all relative ${
               branch.status === 'ACTIVE'
-                ? 'bg-slate-900/80 border-slate-800 hover:border-teal-500/50 shadow-md'
-                : 'bg-slate-950/60 border-slate-800/80 opacity-90'
+                ? 'bg-white border-slate-200 hover:border-teal-400 shadow-sm'
+                : 'bg-slate-50/80 border-slate-200 opacity-90'
             }`}
           >
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-teal-400 bg-teal-950 px-2.5 py-1 rounded-lg border border-teal-800">
+              <span className="text-xs font-black text-teal-800 bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-200">
                 {branch.code}
               </span>
-              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                branch.status === 'ACTIVE'
-                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                  : 'bg-amber-950 text-amber-300 border border-amber-800'
-              }`}>
-                {branch.status === 'ACTIVE' ? 'Active Branch' : 'Upcoming Branch'}
-              </span>
+
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                  branch.status === 'ACTIVE'
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                    : 'bg-amber-100 text-amber-800 border border-amber-300'
+                }`}>
+                  {branch.status === 'ACTIVE' ? 'Active Branch' : 'Upcoming Branch'}
+                </span>
+
+                <button
+                  onClick={() => setDeleteConfirmId(branch.id)}
+                  title="Delete Branch"
+                  className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <h3 className="text-base font-extrabold text-white">{branch.name}</h3>
-            <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
-              <MapPin className="w-3.5 h-3.5 text-slate-500" />
+            <h3 className="text-base font-extrabold text-slate-900">{branch.name}</h3>
+            <p className="text-xs text-slate-500 flex items-center gap-1 mt-1 font-medium">
+              <MapPin className="w-3.5 h-3.5 text-slate-400" />
               {branch.city}
             </p>
 
-            <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-              <span className="text-slate-400">Type: <b className="text-slate-200">{branch.type}</b></span>
+            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold">
+              <span className="text-slate-500">Type: <b className="text-slate-800">{branch.type}</b></span>
               {branch.status === 'ACTIVE' ? (
-                <span className="text-teal-300 font-bold flex items-center gap-1">
-                  <Activity className="w-3 h-3 text-teal-400" />
-                  Live XTEND Routing
+                <span className="text-teal-700 font-bold flex items-center gap-1">
+                  <Activity className="w-3.5 h-3.5 text-teal-600" />
+                  Live XTEND Routing ({branch.leadsToday || 0} leads)
                 </span>
               ) : (
-                <span className="text-amber-400 font-semibold flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-amber-400" />
+                <span className="text-amber-700 font-bold flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-amber-600" />
                   Opening Shortly
                 </span>
               )}
             </div>
+
+            {/* Confirm Delete Banner on Card */}
+            {deleteConfirmId === branch.id && (
+              <div className="absolute inset-0 bg-white/95 backdrop-blur-xs rounded-2xl p-4 flex flex-col justify-center items-center text-center space-y-3 z-10 border border-red-300 shadow-md">
+                <AlertTriangle className="w-6 h-6 text-red-600 animate-bounce" />
+                <p className="text-xs font-bold text-slate-900">Delete branch {branch.name}?</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleDeleteBranch(branch.id, branch.name)}
+                    className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all"
+                  >
+                    Yes, Delete
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirmId(null)}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-lg transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
           </div>
         ))}
       </div>
 
       {/* Add Branch Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl relative">
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-xl relative">
             
             <button
-              onClick={() => setShowModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              onClick={() => setShowAddModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-teal-400" />
+            <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-teal-700" />
               Add Expansion Branch
             </h3>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500">
               Register a new hospital branch or IVF clinic unit into the Prashanth Hospitals routing matrix.
             </p>
 
             {errorMsg && (
-              <div className="bg-red-950/80 border border-red-800 text-red-300 text-xs p-2.5 rounded-xl font-semibold">
+              <div className="bg-red-50 border border-red-200 text-red-800 text-xs p-2.5 rounded-xl font-bold">
                 {errorMsg}
               </div>
             )}
 
             {successMsg && (
-              <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-300 text-xs p-2.5 rounded-xl font-semibold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-2.5 rounded-xl font-bold flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                 <span>{successMsg}</span>
               </div>
             )}
 
             <form onSubmit={handleAddBranch} className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Branch Code (3 Letters)</label>
+                <label className="block text-slate-700 font-bold mb-1">Branch Code (3 Letters)</label>
                 <input
                   type="text"
                   maxLength={4}
                   placeholder="e.g. GUD"
                   value={newCode}
                   onChange={(e) => setNewCode(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-teal-500 uppercase font-bold"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-teal-600 uppercase font-bold"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Branch Name</label>
+                <label className="block text-slate-700 font-bold mb-1">Branch Name</label>
                 <input
                   type="text"
                   placeholder="e.g. Guduvanchery Branch"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-teal-500"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-teal-600 font-medium"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">City / Region</label>
+                <label className="block text-slate-700 font-bold mb-1">City / Region</label>
                 <input
                   type="text"
                   placeholder="e.g. Chennai South Suburbs"
                   value={newCity}
                   onChange={(e) => setNewCity(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-teal-500"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-teal-600 font-medium"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Facility Type</label>
+                  <label className="block text-slate-700 font-bold mb-1">Facility Type</label>
                   <select
                     value={newType}
                     onChange={(e) => setNewType(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-teal-500"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-teal-600 font-bold"
                   >
                     <option value="HOSPITAL">HOSPITAL</option>
                     <option value="FERTILITY">FERTILITY</option>
@@ -247,11 +304,11 @@ export default function BranchMatrix() {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Status</label>
+                  <label className="block text-slate-700 font-bold mb-1">Status</label>
                   <select
                     value={newStatus}
                     onChange={(e) => setNewStatus(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-teal-500"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-teal-600 font-bold"
                   >
                     <option value="ACTIVE">ACTIVE</option>
                     <option value="UPCOMING">UPCOMING</option>
@@ -262,7 +319,7 @@ export default function BranchMatrix() {
               <div className="pt-3">
                 <button
                   type="submit"
-                  className="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-2.5 rounded-xl transition-all shadow-md"
+                  className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl transition-all shadow-sm"
                 >
                   Save Branch
                 </button>

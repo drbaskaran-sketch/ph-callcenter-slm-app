@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Phone, MessageSquare, Calendar, UserCheck, Play, Pause, Bell, Clock, Building, Shield, Filter, Search, AlertTriangle, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Phone, MessageSquare, UserCheck, Play, Pause, Clock, Search, Filter, RefreshCw, CheckCircle, ListOrdered, Calendar } from 'lucide-react';
 import { MOCK_ENQUIRIES } from '../data/mockData';
 
 const API_BASE = '/api/v1';
@@ -17,8 +17,6 @@ export default function SLMMobileSimulator() {
   const [filterBranch, setFilterBranch] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [loadingSim, setLoadingSim] = useState(false);
-  
-  const audioRef = useRef(null);
 
   // Fetch live enquiries from FastAPI backend
   const fetchEnquiries = async () => {
@@ -54,9 +52,36 @@ export default function SLMMobileSimulator() {
     }
   }, [selectedEnquiry]);
 
+  // Format current time into HH:MM:SS string
+  const getCurrentFormattedTime = () => {
+    const now = new Date();
+    return now.toTimeString().split(' ')[0];
+  };
+
+  // Register action with timestamp
+  const registerNewAction = (actionText, performedByText = 'SLM Agent') => {
+    const timeStr = getCurrentFormattedTime();
+    const newAction = {
+      timestamp: timeStr,
+      action: actionText,
+      performedBy: performedByText
+    };
+
+    setSelectedEnquiry(prev => {
+      if (!prev) return prev;
+      const currentActions = prev.registeredActions || [];
+      const updated = {
+        ...prev,
+        registeredActions: [...currentActions, newAction]
+      };
+      // also update in enquiries list
+      setEnquiries(list => list.map(item => item.id === prev.id ? updated : item));
+      return updated;
+    });
+  };
+
   // Handle Update Disposition Status with Mandatory Remarks Validation
   const handleUpdateStatus = async (newStatus) => {
-    // Mandatory Remarks Check for CLOSED or CONVERTED
     if ((newStatus === 'CLOSED' || newStatus === 'CONVERTED') && (!remarks || !remarks.trim())) {
       setErrorMessage("⚠️ Mandatory remarks required before closing or converting an enquiry!");
       setTimeout(() => setErrorMessage(null), 4000);
@@ -66,7 +91,9 @@ export default function SLMMobileSimulator() {
     setStatus(newStatus);
     setErrorMessage(null);
 
-    // Call backend API if connected
+    // Register timestamped action
+    registerNewAction(`Status updated to ${newStatus.replace('_', ' ')} with remarks: "${remarks || 'None'}"`, selectedEnquiry.assignedSLM || 'SLM Agent');
+
     try {
       await fetch(`${API_BASE}/enquiries/${selectedEnquiry.id}`, {
         method: 'PATCH',
@@ -81,14 +108,26 @@ export default function SLMMobileSimulator() {
       console.log('Status updated in local state');
     }
 
-    setToastMessage(`✓ Status Updated: ${newStatus.replace('_', ' ')}`);
+    setToastMessage(`✓ Registered Disposition: ${newStatus.replace('_', ' ')}`);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 3000);
   };
 
-  // Handle Play / Pause Call Recording Audio Stream
+  // Handle Dial / WhatsApp action registration
+  const handleDialCall = () => {
+    registerNewAction(`Outbound call initiated to ${selectedEnquiry?.phone}`, selectedEnquiry?.assignedSLM || 'SLM Agent');
+    alert(`Dialing ${selectedEnquiry?.phone}...\nAction registered at ${getCurrentFormattedTime()}`);
+  };
+
+  const handleSendWhatsApp = () => {
+    registerNewAction(`WhatsApp consultation message dispatched to ${selectedEnquiry?.phone}`, selectedEnquiry?.assignedSLM || 'SLM Agent');
+    alert(`Opening WhatsApp chat with ${selectedEnquiry?.phone}...\nAction registered at ${getCurrentFormattedTime()}`);
+  };
+
+  // Handle Audio Playback
   const toggleAudioPlayback = () => {
     if (!isPlaying) {
+      registerNewAction(`Call recording stream played by SLM`, selectedEnquiry?.assignedSLM || 'SLM Agent');
       try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const osc = audioCtx.createOscillator();
@@ -110,7 +149,7 @@ export default function SLMMobileSimulator() {
     }
   };
 
-  // Simulate incoming XTEND DB2 call ingestion
+  // Simulate incoming call ingestion
   const handleSimulateCall = async () => {
     setLoadingSim(true);
     try {
@@ -123,7 +162,16 @@ export default function SLMMobileSimulator() {
       });
       if (res.ok) {
         const data = await res.json();
-        const newEnq = data.enquiry;
+        const newEnq = {
+          ...data.enquiry,
+          callStartTime: getCurrentFormattedTime(),
+          callEndTime: 'In Progress',
+          callDuration: '01m 20s',
+          registeredActions: [
+            { timestamp: getCurrentFormattedTime(), action: 'Inbound Call Connected at Kolathur Hub', performedBy: 'XTEND IVR' },
+            { timestamp: getCurrentFormattedTime(), action: 'Lead Dispatched to SLM', performedBy: 'FCM Push' }
+          ]
+        };
         setEnquiries(prev => [newEnq, ...prev]);
         setSelectedEnquiry(newEnq);
         setStatus(newEnq.status);
@@ -140,7 +188,6 @@ export default function SLMMobileSimulator() {
     }
   };
 
-  // Filter enquiries
   const filteredEnquiries = enquiries.filter(enq => {
     const matchesBranch = filterBranch === 'ALL' || enq.branchCode === filterBranch;
     const matchesSearch = !searchQuery || 
@@ -152,17 +199,17 @@ export default function SLMMobileSimulator() {
 
   return (
     <div className="space-y-6">
-      {/* Top Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+      {/* Header Banner - White Mode */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-slate-200 p-5 rounded-2xl shadow-sm">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold text-white">SLM Mobile Application & Dispatch Simulator</h2>
-            <span className="bg-teal-500/10 text-teal-400 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-teal-500/20">
-              Live DB2 Sync
+            <h2 className="text-xl font-extrabold text-slate-900">SLM Mobile Application & Call Action Register</h2>
+            <span className="bg-teal-50 text-teal-800 text-xs font-bold px-2.5 py-0.5 rounded-full border border-teal-200">
+              Live DB2 Sync & Registered Action Audit Trail
             </span>
           </div>
-          <p className="text-slate-400 text-sm mt-1">
-            Simulates Service Line Manager (SLM) Android & iOS app push notifications, patient triage, and OPD/Surgery slot fixing.
+          <p className="text-slate-500 text-xs mt-1 font-medium">
+            Tracks call timing (start time, end time, duration) and logs registered timestamps for every SLM action on calls and patient queries.
           </p>
         </div>
 
@@ -170,10 +217,10 @@ export default function SLMMobileSimulator() {
           <button
             onClick={handleSimulateCall}
             disabled={loadingSim}
-            className="flex items-center gap-2 bg-teal-600 hover:bg-teal-500 text-white font-bold py-2.5 px-4 rounded-xl shadow-lg transition-all text-xs border border-teal-400/30 disabled:opacity-50"
+            className="flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 px-4 rounded-xl shadow-xs transition-all text-xs disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${loadingSim ? 'animate-spin' : ''}`} />
-            <span>{loadingSim ? 'Ingesting...' : 'Simulate XTEND DB2 Call'}</span>
+            <span>{loadingSim ? 'Ingesting Call...' : 'Simulate Inbound XTEND Call'}</span>
           </button>
         </div>
       </div>
@@ -181,37 +228,37 @@ export default function SLMMobileSimulator() {
       {/* Filter and Search Bar */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
+          <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
           <input
             type="text"
             placeholder="Search patient, phone, or department..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 text-sm text-slate-200 pl-10 pr-4 py-2.5 rounded-xl focus:outline-none focus:border-teal-500"
+            className="w-full bg-white border border-slate-200 text-xs font-medium text-slate-900 pl-10 pr-4 py-2.5 rounded-xl focus:outline-none focus:border-teal-600 shadow-xs"
           />
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3.5 py-1.5 rounded-xl">
-          <Filter className="w-4 h-4 text-teal-400 shrink-0" />
-          <span className="text-xs text-slate-400 font-semibold shrink-0">Branch:</span>
+        <div className="flex items-center gap-2 bg-white border border-slate-200 px-3.5 py-1.5 rounded-xl shadow-xs">
+          <Filter className="w-4 h-4 text-teal-700 shrink-0" />
+          <span className="text-xs text-slate-500 font-bold shrink-0">Branch:</span>
           <select
             value={filterBranch}
             onChange={(e) => setFilterBranch(e.target.value)}
-            className="bg-transparent text-sm font-semibold text-slate-200 focus:outline-none w-full"
+            className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none w-full"
           >
-            <option value="ALL" className="bg-slate-900">All Branches (7)</option>
-            <option value="KOL" className="bg-slate-900">Kolathur Hub (KOL)</option>
-            <option value="CHP" className="bg-slate-900">Chetpet (CHP)</option>
-            <option value="VEL" className="bg-slate-900">Velachery (VEL)</option>
-            <option value="GUM" className="bg-slate-900">Gummidipoondi (GUM)</option>
-            <option value="IVF" className="bg-slate-900">IVF Clinics (IVF)</option>
+            <option value="ALL">All Branches (7)</option>
+            <option value="KOL">Kolathur Hub (KOL)</option>
+            <option value="CHP">Chetpet (CHP)</option>
+            <option value="VEL">Velachery (VEL)</option>
+            <option value="GUM">Gummidipoondi (GUM)</option>
+            <option value="IVF">IVF Clinics (IVF)</option>
           </select>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-xl flex items-center justify-between">
-          <span className="text-xs text-slate-400 font-medium">Queue Status:</span>
-          <span className="text-xs font-bold text-teal-400 bg-teal-500/10 px-2.5 py-1 rounded-lg border border-teal-500/20">
-            {filteredEnquiries.length} Active Leads
+        <div className="bg-white border border-slate-200 px-4 py-2.5 rounded-xl flex items-center justify-between shadow-xs">
+          <span className="text-xs text-slate-500 font-bold">Queue Status:</span>
+          <span className="text-xs font-black text-teal-800 bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-200">
+            {filteredEnquiries.length} Active Call Leads
           </span>
         </div>
       </div>
@@ -219,58 +266,74 @@ export default function SLMMobileSimulator() {
       {/* Main Grid: Queue List + Mobile Phone Frame */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* Left Side: SLM Lead Dispatch Queue (7 cols) */}
+        {/* Left Side: Call Queue with Timing (7 cols) */}
         <div className="lg:col-span-7 space-y-3">
-          <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between">
-            <span>Inbound XTEND DB2 Call Queue</span>
-            <span className="text-xs text-slate-500 font-normal">Click a lead to inspect on mobile simulator</span>
+          <h3 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+            <span>Inbound XTEND Call Queue & Action Logs</span>
+            <span className="text-xs text-slate-500 font-normal">Click a lead to view call timing & action register</span>
           </h3>
 
-          <div className="space-y-2.5 max-h-[640px] overflow-y-auto pr-1">
+          <div className="space-y-3 max-h-[680px] overflow-y-auto pr-1">
             {filteredEnquiries.map((enq) => {
               const isSelected = selectedEnquiry && selectedEnquiry.id === enq.id;
               return (
                 <div
                   key={enq.id}
                   onClick={() => setSelectedEnquiry(enq)}
-                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                  className={`p-4 rounded-2xl border cursor-pointer transition-all ${
                     isSelected
-                      ? 'bg-slate-800/90 border-teal-500 shadow-md shadow-teal-500/10'
-                      : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                      ? 'bg-teal-50/60 border-teal-500 shadow-md'
+                      : 'bg-white border-slate-200 hover:border-slate-300 shadow-xs'
                   }`}
                 >
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-white text-base">{enq.patientName}</span>
+                        <span className="font-extrabold text-slate-900 text-base">{enq.patientName}</span>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                          enq.priority === 'URGENT' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                          enq.priority === 'HIGH' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                          'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                          enq.priority === 'URGENT' ? 'bg-red-100 text-red-700 border border-red-200' :
+                          enq.priority === 'HIGH' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                          'bg-blue-100 text-blue-700 border border-blue-200'
                         }`}>
                           {enq.priority}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-400 mt-1 flex items-center gap-2">
+                      <p className="text-xs text-slate-600 mt-1 flex items-center gap-2 font-medium">
                         <span>{enq.phone}</span>
                         <span>•</span>
-                        <span className="text-teal-300 font-semibold">{enq.department}</span>
+                        <span className="text-teal-800 font-bold">{enq.department}</span>
                       </p>
                     </div>
 
                     <div className="text-right">
-                      <span className="text-xs font-bold text-slate-300 block">{enq.branchCode}</span>
-                      <span className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5 justify-end">
-                        <Clock className="w-3 h-3" /> {enq.timeAgo}
+                      <span className="text-xs font-black text-slate-800 block">{enq.branchCode}</span>
+                      <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1 mt-0.5 justify-end">
+                        <Clock className="w-3 h-3 text-slate-400" /> {enq.timeAgo}
                       </span>
                     </div>
                   </div>
 
-                  <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                    <span className="text-slate-400 flex items-center gap-1">
-                      <UserCheck className="w-3.5 h-3.5 text-teal-400" /> {enq.assignedSLM}
+                  {/* Registered Call Timing Info */}
+                  <div className="mt-3 pt-2.5 border-t border-slate-200/80 grid grid-cols-3 gap-2 text-[11px]">
+                    <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-center">
+                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Call Start</span>
+                      <span className="font-bold text-slate-800">{enq.callStartTime || '17:25:10'}</span>
+                    </div>
+                    <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-center">
+                      <span className="text-slate-400 block text-[9px] uppercase font-bold">Call End</span>
+                      <span className="font-bold text-slate-800">{enq.callEndTime || '17:27:24'}</span>
+                    </div>
+                    <div className="bg-teal-100/50 p-1.5 rounded-lg border border-teal-200 text-center">
+                      <span className="text-teal-700 block text-[9px] uppercase font-bold">Duration</span>
+                      <span className="font-extrabold text-teal-900">{enq.callDuration || '02m 14s'}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 flex items-center justify-between text-xs font-semibold">
+                    <span className="text-slate-600 flex items-center gap-1">
+                      <UserCheck className="w-3.5 h-3.5 text-teal-700" /> {enq.assignedSLM}
                     </span>
-                    <span className="bg-slate-950 text-slate-300 px-2.5 py-0.5 rounded-full text-[11px] border border-slate-800">
+                    <span className="bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full text-[11px] border border-slate-200 font-bold">
                       {enq.status.replace('_', ' ')}
                     </span>
                   </div>
@@ -282,41 +345,41 @@ export default function SLMMobileSimulator() {
 
         {/* Right Side: SLM Android/iOS Mobile Device Frame (5 cols) */}
         <div className="lg:col-span-5 flex justify-center">
-          <div className="w-full max-w-[380px] bg-slate-950 border-[10px] border-slate-800 rounded-[48px] p-3 shadow-2xl relative">
+          <div className="w-full max-w-[380px] bg-slate-900 border-[8px] border-slate-800 rounded-[44px] p-3 shadow-2xl relative">
             
-            {/* Speaker & Camera Notch */}
-            <div className="w-32 h-5 bg-slate-800 rounded-b-2xl mx-auto mb-2 flex items-center justify-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-slate-900"></div>
-              <div className="w-8 h-1.5 rounded-full bg-slate-900"></div>
+            {/* Speaker Notch */}
+            <div className="w-28 h-4 bg-slate-800 rounded-b-2xl mx-auto mb-2 flex items-center justify-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-slate-950"></div>
+              <div className="w-7 h-1 rounded-full bg-slate-950"></div>
             </div>
 
-            {/* Mobile App Screen Content */}
-            <div className="bg-slate-900 rounded-[36px] pt-4 pb-4 px-4 min-h-[640px] flex flex-col justify-between text-slate-100 relative">
+            {/* Mobile App Screen Content - Clean Light Mode */}
+            <div className="bg-slate-50 rounded-[32px] pt-4 pb-4 px-4 min-h-[640px] flex flex-col justify-between text-slate-800 relative">
               
               {/* Toast Notification Banner */}
               {showToast && (
-                <div className="absolute top-4 left-4 right-4 bg-teal-600 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-xl z-40 text-center animate-bounce border border-teal-400">
+                <div className="absolute top-4 left-4 right-4 bg-teal-700 text-white text-xs font-bold py-2 px-3 rounded-xl shadow-lg z-40 text-center border border-teal-500">
                   {toastMessage}
                 </div>
               )}
 
               {/* Error Message Banner */}
               {errorMessage && (
-                <div className="absolute top-4 left-4 right-4 bg-red-950 text-red-200 text-xs font-bold py-2.5 px-4 rounded-xl shadow-xl z-40 text-center border border-red-700">
+                <div className="absolute top-4 left-4 right-4 bg-red-600 text-white text-xs font-bold py-2 px-3 rounded-xl shadow-lg z-40 text-center">
                   {errorMessage}
                 </div>
               )}
 
               {/* Mobile Header Bar */}
-              <div className="border-b border-slate-800 pb-3 mb-3">
+              <div className="border-b border-slate-200 pb-2.5 mb-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
-                    <div className="w-6 h-6 rounded-lg bg-teal-600 flex items-center justify-center font-bold text-[10px] text-white">
+                    <div className="w-6 h-6 rounded-lg bg-teal-700 flex items-center justify-center font-black text-[10px] text-white">
                       PH
                     </div>
-                    <span className="text-xs font-bold text-white">Prashanth SLM App</span>
+                    <span className="text-xs font-extrabold text-slate-900">Prashanth SLM App</span>
                   </div>
-                  <span className="text-[10px] bg-teal-950 text-teal-300 font-semibold px-2 py-0.5 rounded-full border border-teal-800">
+                  <span className="text-[10px] bg-teal-100 text-teal-800 font-bold px-2 py-0.5 rounded-full border border-teal-300">
                     LIVE FCM PUSH
                   </span>
                 </div>
@@ -328,31 +391,83 @@ export default function SLMMobileSimulator() {
                   
                   {/* FCR Alert Badge if Agent Resolved */}
                   {selectedEnquiry.fcmBypassed && (
-                    <div className="bg-purple-950/80 border border-purple-800/80 p-2.5 rounded-xl text-purple-200 text-[11px] flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-purple-400 shrink-0" />
-                      <span><b>FCR Bypass:</b> Resolved on call by Agent. Suppressed FCM alert.</span>
+                    <div className="bg-purple-50 border border-purple-200 p-2 rounded-xl text-purple-900 text-[11px] flex items-center gap-2 font-medium">
+                      <CheckCircle className="w-4 h-4 text-purple-600 shrink-0" />
+                      <span><b>FCR Bypass:</b> Resolved on call by Agent. FCM suppressed.</span>
                     </div>
                   )}
 
                   {/* Patient Header Card */}
-                  <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-bold text-teal-400">{selectedEnquiry.id}</span>
-                      <span className="text-[10px] font-semibold text-slate-400">{selectedEnquiry.branch}</span>
+                      <span className="text-[10px] font-black text-teal-800">{selectedEnquiry.id}</span>
+                      <span className="text-[10px] font-bold text-slate-500">{selectedEnquiry.branch}</span>
                     </div>
-                    <h3 className="text-sm font-extrabold text-white">{selectedEnquiry.patientName}</h3>
-                    <p className="text-xs text-slate-300 mt-0.5">{selectedEnquiry.phone} • {selectedEnquiry.gender}, {selectedEnquiry.age}y</p>
-                    <p className="text-xs font-medium text-teal-300 mt-1">{selectedEnquiry.enquiryType}</p>
+                    <h3 className="text-sm font-black text-slate-900">{selectedEnquiry.patientName}</h3>
+                    <p className="text-xs text-slate-600 font-medium mt-0.5">{selectedEnquiry.phone} • {selectedEnquiry.gender}, {selectedEnquiry.age}y</p>
+                    <p className="text-xs font-bold text-teal-800 mt-1">{selectedEnquiry.enquiryType}</p>
                   </div>
 
-                  {/* Call Audio Recording Stream Player (Nullable Voice Path Support) */}
-                  <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
-                        <Phone className="w-3 h-3 text-teal-400" />
-                        XTEND Call Recording Stream
+                  {/* Call Timing & Duration Card */}
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-extrabold text-slate-800 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-teal-700" />
+                        Call Timing & Duration
                       </span>
-                      <span className="text-[10px] text-slate-500">
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-300">
+                        {selectedEnquiry.callDuration || '02m 14s'}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 text-[10px]">
+                      <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                        <span className="text-slate-400 block font-bold">START TIME</span>
+                        <span className="font-extrabold text-slate-800">{selectedEnquiry.callStartTime || '17:25:10'}</span>
+                      </div>
+                      <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                        <span className="text-slate-400 block font-bold">END TIME</span>
+                        <span className="font-extrabold text-slate-800">{selectedEnquiry.callEndTime || '17:27:24'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Registered Action Timeline */}
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-extrabold text-slate-800 flex items-center gap-1">
+                        <ListOrdered className="w-3.5 h-3.5 text-teal-700" />
+                        Registered Action Timestamps
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto text-[10px]">
+                      {(selectedEnquiry.registeredActions || [
+                        { timestamp: '17:25:10', action: 'Inbound Call Connected at Kolathur Hub', performedBy: 'XTEND IVR' },
+                        { timestamp: '17:25:35', action: 'Angiogram inquiry registered', performedBy: 'Agent #104' },
+                        { timestamp: '17:26:45', action: 'Dr. Consultation slot fixed', performedBy: selectedEnquiry.assignedSLM }
+                      ]).map((act, idx) => (
+                        <div key={idx} className="bg-slate-50 p-2 rounded-lg border border-slate-200 flex items-start gap-2">
+                          <span className="font-black text-teal-800 bg-teal-100/70 px-1.5 py-0.5 rounded text-[9px] shrink-0">
+                            {act.timestamp}
+                          </span>
+                          <div>
+                            <p className="font-bold text-slate-800 leading-tight">{act.action}</p>
+                            <span className="text-slate-400 text-[8px] font-medium">{act.performedBy}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Audio Recording Stream */}
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-extrabold text-slate-800 flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-teal-700" />
+                        XTEND Audio Recording
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-bold">
                         {selectedEnquiry.recordingUrl || selectedEnquiry.recording_path ? (selectedEnquiry.audioDuration || "3.0s WAV") : "Audio Pending"}
                       </span>
                     </div>
@@ -361,29 +476,28 @@ export default function SLMMobileSimulator() {
                       <div className="flex items-center gap-3">
                         <button
                           onClick={toggleAudioPlayback}
-                          className="w-8 h-8 rounded-full bg-teal-600 hover:bg-teal-500 flex items-center justify-center text-white transition-all shadow-md"
+                          className="w-8 h-8 rounded-full bg-teal-700 hover:bg-teal-800 flex items-center justify-center text-white transition-all shadow-xs"
                         >
                           {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
                         </button>
-                        <div className="flex-1 bg-slate-800 h-2 rounded-full overflow-hidden">
-                          <div className={`h-full bg-teal-400 transition-all ${isPlaying ? 'w-3/4 animate-pulse' : 'w-1/4'}`}></div>
+                        <div className="flex-1 bg-slate-200 h-2 rounded-full overflow-hidden">
+                          <div className={`h-full bg-teal-600 transition-all ${isPlaying ? 'w-3/4 animate-pulse' : 'w-1/4'}`}></div>
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-slate-900/90 border border-amber-900/40 p-2.5 rounded-xl text-[11px] text-amber-300 flex items-center gap-2">
-                        <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <div className="bg-amber-50 border border-amber-200 p-2 rounded-xl text-[10px] text-amber-800 font-bold flex items-center gap-2">
                         <span>Audio sync pending from DB2. Processing text payload.</span>
                       </div>
                     )}
                   </div>
 
-                  {/* Doctor & Mandatory Remarks Input */}
-                  <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-2">
-                    <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
-                      <UserCheck className="w-3 h-3 text-teal-400" />
-                      Doctor & Resolution Remarks
+                  {/* Doctor & Resolution Remarks Input */}
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                    <span className="text-[11px] font-extrabold text-slate-800 flex items-center gap-1">
+                      <UserCheck className="w-3 h-3 text-teal-700" />
+                      Doctor & Mandatory Remarks
                     </span>
-                    <p className="text-xs text-white font-semibold">{selectedEnquiry.doctorName}</p>
+                    <p className="text-xs text-slate-900 font-extrabold">{selectedEnquiry.doctorName}</p>
                     
                     <textarea
                       value={remarks}
@@ -393,24 +507,24 @@ export default function SLMMobileSimulator() {
                       }}
                       placeholder="Enter mandatory resolution remarks prior to closing..."
                       rows={2}
-                      className="w-full bg-slate-900 border border-slate-800 text-xs text-slate-200 p-2 rounded-lg focus:outline-none focus:border-teal-500 resize-none"
+                      className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2 rounded-lg focus:outline-none focus:border-teal-600 resize-none font-medium"
                     />
                   </div>
 
                   {/* Status Picker Buttons */}
-                  <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-2">
-                    <label className="text-[11px] font-bold text-slate-300 block">
-                      Update Disposition (Mandatory Remarks for Closed):
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+                    <label className="text-[11px] font-extrabold text-slate-800 block">
+                      Register Disposition (Mandatory Remarks for Closed):
                     </label>
                     <div className="grid grid-cols-2 gap-1.5">
                       {['CONTACTED', 'DOCTOR_CONSULTED', 'CONVERTED', 'CLOSED'].map((st) => (
                         <button
                           key={st}
                           onClick={() => handleUpdateStatus(st)}
-                          className={`text-[10px] font-bold py-1.5 px-2 rounded-lg border transition-all ${
+                          className={`text-[10px] font-extrabold py-1.5 px-2 rounded-lg border transition-all ${
                             status === st
-                              ? 'bg-teal-600 border-teal-400 text-white'
-                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                              ? 'bg-teal-700 border-teal-700 text-white shadow-xs'
+                              : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
                           }`}
                         >
                           {st.replace('_', ' ')}
@@ -423,17 +537,17 @@ export default function SLMMobileSimulator() {
               )}
 
               {/* Action Toolbar */}
-              <div className="pt-3 border-t border-slate-800 grid grid-cols-2 gap-2">
+              <div className="pt-3 border-t border-slate-200 grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => alert(`Dialing ${selectedEnquiry?.phone}...`)}
-                  className="bg-teal-600 hover:bg-teal-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
+                  onClick={handleDialCall}
+                  className="bg-teal-700 hover:bg-teal-800 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs"
                 >
                   <Phone className="w-3.5 h-3.5" />
                   <span>Call Patient</span>
                 </button>
                 <button
-                  onClick={() => alert(`Opening WhatsApp chat with ${selectedEnquiry?.phone}...`)}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
+                  onClick={handleSendWhatsApp}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
                   <span>WhatsApp</span>

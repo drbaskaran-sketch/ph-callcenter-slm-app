@@ -250,6 +250,16 @@ def create_branch(payload: BranchCreateSchema):
     BRANCHES.append(new_branch)
     return {"message": "Branch created successfully", "branch": new_branch}
 
+@app.delete("/api/v1/branches/{branch_id}")
+def delete_branch(branch_id: str):
+    global BRANCHES
+    original_len = len(BRANCHES)
+    BRANCHES = [b for b in BRANCHES if b["id"] != branch_id and b["code"].upper() != branch_id.upper()]
+    if len(BRANCHES) == original_len:
+        raise HTTPException(status_code=404, detail=f"Branch {branch_id} not found.")
+    return {"message": f"Branch {branch_id} deleted successfully"}
+
+
 # 2. SERVICE LINE MANAGERS (SLMs)
 @app.get("/api/v1/slms")
 def get_slms():

@@ -16,6 +16,7 @@ export const MOCK_ENQUIRIES = [
     age: 48,
     gender: 'Male',
     branch: 'Kolathur (Call Center Hub)',
+    branchCode: 'KOL',
     department: 'Cardiology',
     doctorName: 'Dr. S. Prashanth, Sr. Cardiologist',
     enquiryType: 'Coronary Angiogram Inquiry',
@@ -24,10 +25,19 @@ export const MOCK_ENQUIRIES = [
     disposition: 'APPOINTMENT_FIXED',
     assignedSLM: 'Vijay Kumar (SLM Cardio)',
     timeAgo: '12 mins ago',
-    audioDuration: '2m 14s',
-    recordingUrl: 'wav_8801.wav', // Available voice path
+    callStartTime: '17:25:10',
+    callEndTime: '17:27:24',
+    callDuration: '02m 14s',
+    recordingUrl: 'wav_8801.wav',
     remarks: 'Patient reports mild exertional chest pain. Fixed procedure appointment for Thursday 10:00 AM.',
-    fcmBypassed: false
+    fcmBypassed: false,
+    registeredActions: [
+      { timestamp: '17:25:10', action: 'Inbound Call Connected at Kolathur Hub', performedBy: 'XTEND DB2 Engine' },
+      { timestamp: '17:25:35', action: 'Coronary Angiogram query registered by Agent', performedBy: 'Agent #104' },
+      { timestamp: '17:26:00', action: 'Lead Dispatched to SLM Vijay Kumar', performedBy: 'FCM Push System' },
+      { timestamp: '17:26:45', action: 'Dr. S. Prashanth consultation slot assigned', performedBy: 'Vijay Kumar (SLM)' },
+      { timestamp: '17:27:24', action: 'Surgery & Procedure Slot Confirmed', performedBy: 'Vijay Kumar (SLM)' }
+    ]
   },
   {
     id: 'ENQ-2026-8802',
@@ -36,18 +46,28 @@ export const MOCK_ENQUIRIES = [
     age: 34,
     gender: 'Female',
     branch: 'Chetpet',
+    branchCode: 'CHP',
     department: 'IVF & Fertility',
     doctorName: 'Dr. Geetha Haripriya, Lead Fertility Specialist',
-    enquiryType: 'General IVF Pricing & Package Inquiry', // Broad SLM query type
+    enquiryType: 'General IVF Pricing & Package Inquiry',
     priority: 'URGENT',
     status: 'APPOINTMENT_CONFIRMED',
     disposition: 'INFO_GIVEN',
     assignedSLM: 'Anitha Ramesh (SLM Fertility)',
     timeAgo: '28 mins ago',
-    audioDuration: null,
-    recordingUrl: null, // Nullable voice path (audio sync pending)
+    callStartTime: '17:10:00',
+    callEndTime: '17:13:45',
+    callDuration: '03m 45s',
+    recordingUrl: null,
     remarks: 'Shared 3rd cycle tariff estimate via WhatsApp. Scheduled in-person counseling on Friday 11:30 AM.',
-    fcmBypassed: false
+    fcmBypassed: false,
+    registeredActions: [
+      { timestamp: '17:10:00', action: 'Inbound Call Received via Chetpet Line', performedBy: 'XTEND IVR' },
+      { timestamp: '17:10:40', action: 'IVF Package details requested', performedBy: 'Patient Inquiry' },
+      { timestamp: '17:11:15', action: 'Lead Routed to SLM Anitha Ramesh', performedBy: 'SLM Auto-Router' },
+      { timestamp: '17:12:30', action: 'Tariff PDF sent to patient on WhatsApp', performedBy: 'Anitha Ramesh (SLM)' },
+      { timestamp: '17:13:45', action: 'In-person counseling session booked', performedBy: 'Anitha Ramesh (SLM)' }
+    ]
   },
   {
     id: 'ENQ-2026-8803',
@@ -56,18 +76,26 @@ export const MOCK_ENQUIRIES = [
     age: 52,
     gender: 'Male',
     branch: 'Velachery',
+    branchCode: 'VEL',
     department: 'General Services',
     doctorName: 'N/A (Agent FCR)',
-    enquiryType: 'OPD Timing & Specialist Availability Request', // General Info Request
+    enquiryType: 'OPD Timing & Specialist Availability Request',
     priority: 'MEDIUM',
-    status: 'CLOSED', // First-Contact Resolution (FCR)
+    status: 'CLOSED',
     disposition: 'INFO_GIVEN',
     assignedSLM: 'None (FCR Agent Resolved)',
     timeAgo: '35 mins ago',
-    audioDuration: null,
+    callStartTime: '17:02:15',
+    callEndTime: '17:03:05',
+    callDuration: '00m 50s',
     recordingUrl: null,
     remarks: 'Call Center Agent provided OPD timings for Velachery branch over phone. Query resolved immediately.',
-    fcmBypassed: true // FCM push suppressed
+    fcmBypassed: true,
+    registeredActions: [
+      { timestamp: '17:02:15', action: 'Call connected at Central Call Center', performedBy: 'XTEND Engine' },
+      { timestamp: '17:02:40', action: 'Agent provided OPD Timings over call', performedBy: 'Agent #108 (FCR)' },
+      { timestamp: '17:03:05', action: 'FCR Resolution complete. FCM alert bypassed.', performedBy: 'System Auto-Closure' }
+    ]
   },
   {
     id: 'ENQ-2026-8804',
@@ -76,6 +104,7 @@ export const MOCK_ENQUIRIES = [
     age: 62,
     gender: 'Male',
     branch: 'Velachery',
+    branchCode: 'VEL',
     department: 'Orthopedics',
     doctorName: 'Dr. R. Balaji, Knee Replacement Specialist',
     enquiryType: 'Bilateral Knee Surgery Estimate',
@@ -84,9 +113,17 @@ export const MOCK_ENQUIRIES = [
     disposition: 'ESTIMATE_PROVIDED',
     assignedSLM: 'Suresh Babu (SLM Ortho)',
     timeAgo: '45 mins ago',
-    audioDuration: '3m 40s',
+    callStartTime: '16:50:00',
+    callEndTime: '16:54:12',
+    callDuration: '04m 12s',
     recordingUrl: 'wav_8803.wav',
     remarks: 'Reviewed X-ray scans with Dr. Balaji. Shared package estimate.',
-    fcmBypassed: false
+    fcmBypassed: false,
+    registeredActions: [
+      { timestamp: '16:50:00', action: 'Call Received for Ortho Surgery Query', performedBy: 'XTEND DB2' },
+      { timestamp: '16:50:50', action: 'Dispatched to Suresh Babu (SLM Ortho)', performedBy: 'SLM Dispatch' },
+      { timestamp: '16:52:10', action: 'X-ray scan review request logged', performedBy: 'Suresh Babu (SLM)' },
+      { timestamp: '16:54:12', action: 'Estimate provided & Doctor consultation done', performedBy: 'Suresh Babu (SLM)' }
+    ]
   }
 ];
