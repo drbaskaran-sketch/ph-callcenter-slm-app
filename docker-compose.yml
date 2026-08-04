@@ -2,6 +2,28 @@ version: '3.8'
 
 services:
   # -------------------------------------------------------------------
+  # PostgreSQL Operational Database (Enquiry records & action audit log)
+  # -------------------------------------------------------------------
+  ph-postgres:
+    image: postgres:16-alpine
+    container_name: ph-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-ph_db_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ph_secure_pass}
+      - POSTGRES_DB=${POSTGRES_DB:-ph_callcenter_slm_db}
+    volumes:
+      - ph_pgdata:/var/lib/postgresql/data
+    networks:
+      - ph-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ph_db_user} -d ${POSTGRES_DB:-ph_callcenter_slm_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # -------------------------------------------------------------------
   # FastAPI Backend Service (XTEND DB2 Ingestion & SLM Dispatch Engine)
   # -------------------------------------------------------------------
   ph-backend:
@@ -17,6 +39,9 @@ services:
     environment:
       - APP_ENV=production
       - PORT=8000
+    depends_on:
+      ph-postgres:
+        condition: service_healthy
     networks:
       - ph-network
     healthcheck:
@@ -53,3 +78,7 @@ networks:
   ph-network:
     name: ph-network
     driver: bridge
+
+volumes:
+  ph_pgdata:
+    name: ph_pgdata
