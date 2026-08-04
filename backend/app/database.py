@@ -3,17 +3,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import QueuePool, StaticPool
 
-# Production-grade PostgreSQL / XTEND DB2 Connection String
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://ph_db_user:PhHospital2026!@localhost:5432/ph_callcenter_slm_db"
-)
+try:
+    from .config import settings
+except ImportError:
+    from config import settings
 
-# High-Concurrency Connection Pooling Parameters
-POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "20"))        # Persistent connections retained in pool
-MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "30"))    # Burst connections permitted under heavy call spikes
-POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))    # Seconds to wait for available connection
-POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # Recycle idle connections every 30 mins
+DATABASE_URL = settings.DATABASE_URL
+POOL_SIZE = settings.DB_POOL_SIZE
+MAX_OVERFLOW = settings.DB_MAX_OVERFLOW
+POOL_TIMEOUT = settings.DB_POOL_TIMEOUT
+POOL_RECYCLE = settings.DB_POOL_RECYCLE
 
 class ProductionDatabaseManager:
     """Manages production-grade connection pooling for XTEND DB2 / PostgreSQL operational database"""
@@ -27,14 +26,12 @@ class ProductionDatabaseManager:
     def _create_pooled_engine(self):
         try:
             if self.db_url.startswith("sqlite"):
-                # Fast in-memory pooled engine for local unit/integration tests
                 return create_engine(
                     self.db_url,
                     connect_args={"check_same_thread": False},
                     poolclass=StaticPool
                 )
             else:
-                # Production QueuePool for PostgreSQL / XTEND DB2 operational replication
                 return create_engine(
                     self.db_url,
                     poolclass=QueuePool,
@@ -76,11 +73,9 @@ class ProductionDatabaseManager:
                 "status": "Healthy (Static Test Pool)"
             }
 
-# Singleton instance
 db_manager = ProductionDatabaseManager()
 
 def get_db_session():
-    """Dependency provider yielding database sessions with automatic cleanup"""
     db = db_manager.SessionLocal()
     try:
         yield db
