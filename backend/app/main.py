@@ -371,11 +371,11 @@ def update_enquiry(enquiry_id: str, payload: EnquiryUpdateSchema):
             if payload.status:
                 # Mandatory Remarks check for CLOSED or CONVERTED
                 if payload.status in ["CLOSED", "CONVERTED"]:
-                    req_remarks = payload.remarks or payload.notes or enq.get("remarks")
-                    if not req_remarks or not req_remarks.strip():
+                    submitted_remarks = payload.remarks if payload.remarks is not None else payload.notes
+                    if not submitted_remarks or not submitted_remarks.strip():
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Mandatory remarks required to update status to {payload.status}."
+                            detail=f"Mandatory resolution remarks required to update status to {payload.status}."
                         )
                 enq["status"] = payload.status
             if payload.notes:
