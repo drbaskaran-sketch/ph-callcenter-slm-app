@@ -217,6 +217,17 @@ def read_root():
     }
 
 # 1. BRANCHES
+try:
+    from .database import db_manager
+except ImportError:
+    import sys, os
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from database import db_manager
+
+@app.get("/api/v1/db/pool-status")
+def get_db_pool_status():
+    return db_manager.get_pool_status()
+
 @app.get("/api/v1/branches")
 def get_branches():
     return {"branches": BRANCHES, "total": len(BRANCHES)}
