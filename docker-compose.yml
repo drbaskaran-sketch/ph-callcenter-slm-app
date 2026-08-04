@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------------
+  # FastAPI Backend Service (XTEND DB2 Ingestion & SLM Dispatch Engine)
+  # -------------------------------------------------------------------
+  ph-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ph-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=production
+      - PORT=8000
+    networks:
+      - ph-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # -------------------------------------------------------------------
+  # Vite React Frontend Service (Lightweight Nginx Web Server)
+  # -------------------------------------------------------------------
+  ph-frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: ph-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      ph-backend:
+        condition: service_healthy
+    networks:
+      - ph-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  ph-network:
+    name: ph-network
+    driver: bridge
