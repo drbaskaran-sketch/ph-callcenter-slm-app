@@ -1,0 +1,51 @@
+name: Continuous Deployment (CD) — Zero Downtime Server Deploy
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Production Docker Images"]
+    types:
+      - completed
+
+jobs:
+  deploy-production-server:
+    name: Secure SSH Deployment & Zero-Downtime Container Restart
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: 📥 Check out repository code
+        uses: actions/checkout@v4
+
+      - name: 🔐 Execute Remote Zero-Downtime Deployment via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_SERVER_HOST }}
+          username: ${{ secrets.PROD_SERVER_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: 22
+          script: |
+            echo "=========================================================================="
+            echo "🚀 STARTING ZERO-DOWNTIME PRODUCTION CONTAINER DEPLOYMENT"
+            echo "=========================================================================="
+            
+            cd /home/ubuntu/ph-callcenter-slm-app || exit 1
+            
+            echo "1️⃣  Pulling latest code from main branch..."
+            git pull origin main
+            
+            echo "2️⃣  Pulling latest production container images from registry..."
+            docker compose pull
+            
+            echo "3️⃣  Performing Zero-Downtime Container Rolling Update..."
+            docker compose up -d --remove-orphans
+            
+            echo "4️⃣  Cleaning up legacy unused image layers..."
+            docker image prune -f
+            
+            echo "5️⃣  Verifying Production Server Health..."
+            curl -f http://localhost:8000/ || exit 1
+            curl -f http://localhost:5173/ || exit 1
+            
+            echo "=========================================================================="
+            echo "✨ PRODUCTION ZERO-DOWNTIME DEPLOYMENT COMPLETED SUCCESSFULLY"
+            echo "=========================================================================="
