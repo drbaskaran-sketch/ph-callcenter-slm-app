@@ -265,6 +265,13 @@ def get_enquiries(
     
     return {"enquiries": results, "total": len(results)}
 
+@app.get("/api/v1/enquiries/{enquiry_id}")
+def get_enquiry_by_id(enquiry_id: str):
+    for enq in ENQUIRIES:
+        if enq["id"] == enquiry_id:
+            return {"enquiry": enq}
+    raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+
 @app.post("/api/v1/enquiries", status_code=status.HTTP_201_CREATED)
 def create_enquiry(payload: EnquiryCreate):
     # Mandatory Remarks Check when status is CLOSED or CONVERTED
