@@ -1,0 +1,17 @@
+.git
+.gitignore
+.env
+.env.example
+*.log
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+venv/
+.venv/
+frontend/node_modules/
+frontend/dist/
+dist/
+Dockerfile
+docker-compose.yml
+.DS_Store
