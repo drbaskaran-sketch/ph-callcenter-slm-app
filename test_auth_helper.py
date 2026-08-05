@@ -12,7 +12,7 @@ import os
 import urllib.request
 
 DEFAULT_USERNAME = os.environ.get("PH_TEST_USERNAME", "admin")
-DEFAULT_PASSWORD = os.environ.get("PH_TEST_PASSWORD", "dVg9Qw_bDPjAvZii")
+DEFAULT_PASSWORD = os.environ.get("PH_TEST_PASSWORD", "hxyE7C!roFnMGIsaH1xT")
 
 
 def install_auth_opener(base_url="http://localhost:8000", username=None, password=None):
