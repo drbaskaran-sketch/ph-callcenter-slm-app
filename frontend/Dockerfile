@@ -37,9 +37,13 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80
 
-# Health check to ensure Nginx web server is responding
+# Health check to ensure Nginx web server is responding.
+# Uses 127.0.0.1 explicitly, not "localhost" — busybox wget in this base
+# image resolves "localhost" to ::1 first, and nginx only binds IPv4
+# (`listen 80;`), so the IPv6 attempt was refused and the container sat
+# permanently "unhealthy" despite serving traffic fine on IPv4.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:80/ || exit 1
+    CMD wget --quiet --tries=1 --spider http://127.0.0.1:80/ || exit 1
 
 # Start Nginx in foreground mode
 CMD ["nginx", "-g", "daemon off;"]

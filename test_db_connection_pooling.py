@@ -2,6 +2,7 @@ import urllib.request
 import json
 import concurrent.futures
 import time
+from test_auth_helper import install_auth_opener
 
 FRONTEND_PROXY_URL = "http://localhost:5173"
 BACKEND_URL = "http://localhost:8000"
@@ -23,6 +24,7 @@ def simulate_concurrent_db_call(idx):
         return {"idx": idx, "error": str(e), "success": False}
 
 def main():
+    install_auth_opener(BACKEND_URL)
     print("=" * 80)
     print("🏥 PRASHANTH HOSPITALS — PRODUCTION DB CONNECTION POOLING AUDIT")
     print("=" * 80)

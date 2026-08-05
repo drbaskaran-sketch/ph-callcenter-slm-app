@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PRASHANTH_BRANCHES, MOCK_ENQUIRIES } from '../data/mockData';
 import { Activity, Clock, Building2, UserCheck, AlertTriangle, RefreshCw, Award, PhoneCall, ListOrdered, FileText } from 'lucide-react';
-
-const API_BASE = '/api/v1';
+import { apiFetch, API_BASE } from '../api';
 
 export default function LeadershipDashboard() {
   const [metrics, setMetrics] = useState({
@@ -31,10 +30,10 @@ export default function LeadershipDashboard() {
     setLoading(true);
     try {
       const [resMetrics, resSlms, resBranches, resEnq] = await Promise.all([
-        fetch(`${API_BASE}/analytics/overview`),
-        fetch(`${API_BASE}/slms`),
-        fetch(`${API_BASE}/branches`),
-        fetch(`${API_BASE}/enquiries`)
+        apiFetch(`${API_BASE}/analytics/overview`),
+        apiFetch(`${API_BASE}/slms`),
+        apiFetch(`${API_BASE}/branches`),
+        apiFetch(`${API_BASE}/enquiries`)
       ]);
 
       if (resMetrics.ok) {

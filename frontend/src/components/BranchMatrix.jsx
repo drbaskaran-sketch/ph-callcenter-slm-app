@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PRASHANTH_BRANCHES } from '../data/mockData';
 import { Building2, MapPin, Clock, Activity, PlusCircle, Trash2, X, CheckCircle2, AlertTriangle } from 'lucide-react';
-
-const API_BASE = '/api/v1';
+import { apiFetch, API_BASE } from '../api';
 
 export default function BranchMatrix() {
   const [branches, setBranches] = useState(PRASHANTH_BRANCHES);
@@ -18,7 +17,7 @@ export default function BranchMatrix() {
 
   const fetchBranches = async () => {
     try {
-      const res = await fetch(`${API_BASE}/branches`);
+      const res = await apiFetch(`${API_BASE}/branches`);
       if (res.ok) {
         const data = await res.json();
         if (data.branches) setBranches(data.branches);
@@ -40,7 +39,7 @@ export default function BranchMatrix() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/branches`, {
+      const res = await apiFetch(`${API_BASE}/branches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -92,7 +91,7 @@ export default function BranchMatrix() {
 
   const handleDeleteBranch = async (idToDelete, branchName) => {
     try {
-      await fetch(`${API_BASE}/branches/${idToDelete}`, {
+      await apiFetch(`${API_BASE}/branches/${idToDelete}`, {
         method: 'DELETE'
       });
     } catch (e) {

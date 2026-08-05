@@ -1,7 +1,7 @@
 import React from 'react';
-import { PhoneCall, Building2, Smartphone, Activity } from 'lucide-react';
+import { PhoneCall, Building2, Smartphone, Activity, UserCircle, LogOut } from 'lucide-react';
 
-export default function Header({ activeTab, setActiveTab }) {
+export default function Header({ activeTab, setActiveTab, user, onLogout }) {
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
@@ -68,6 +68,25 @@ export default function Header({ activeTab, setActiveTab }) {
               <span>Branch Matrix</span>
             </button>
           </div>
+
+          {/* Logged-in user & logout */}
+          {user && (
+            <div className="flex items-center gap-3 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                <UserCircle className="w-4 h-4 text-teal-700" />
+                <span>{user.username}</span>
+                <span className="text-[10px] text-slate-400 font-semibold uppercase">({user.role})</span>
+              </div>
+              <button
+                onClick={onLogout}
+                title="Log out"
+                className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-red-700 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Logout</span>
+              </button>
+            </div>
+          )}
 
         </div>
       </div>

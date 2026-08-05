@@ -1,6 +1,7 @@
 import urllib.request
 import json
 import time
+from test_auth_helper import install_auth_opener
 
 FRONTEND_PROXY_URL = "http://localhost:5173"
 BACKEND_URL = "http://localhost:8000"
@@ -75,6 +76,7 @@ def test_mandatory_remarks_enforcement(enquiry_id):
         return False
 
 def main():
+    install_auth_opener(BACKEND_URL)
     print("=" * 75)
     print("🏥 PRASHANTH HOSPITALS — END-TO-END CALL INGESTION & DATA MAPPING AUDIT")
     print("=" * 75)

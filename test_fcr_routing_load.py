@@ -2,6 +2,7 @@ import urllib.request
 import json
 import concurrent.futures
 import time
+from test_auth_helper import install_auth_opener
 
 FRONTEND_PROXY_URL = "http://localhost:5173"
 BACKEND_URL = "http://localhost:8000"
@@ -72,6 +73,7 @@ def simulate_branch_call(payload, call_index):
         }
 
 def main():
+    install_auth_opener(BACKEND_URL)
     print("=" * 80)
     print("🏥 PRASHANTH HOSPITALS — FCR & MULTI-BRANCH AUTO-ROUTING LOAD TEST")
     print("=" * 80)

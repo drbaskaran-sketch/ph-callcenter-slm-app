@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query, Response, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -10,6 +11,13 @@ import random
 import io
 import wave
 import math
+import jwt
+import bcrypt
+
+try:
+    from .config import settings
+except ImportError:
+    from config import settings
 
 app = FastAPI(
     title="Prashanth Hospitals Call Center & SLM API",
@@ -17,18 +25,21 @@ app = FastAPI(
     description="Backend API with FCR Notification Bypass, Nullable Voice Paths, Multi-Branch Routing, SLA Governance, and SLM Mobile App"
 )
 
-# Enable CORS for frontend integration
+# Enable CORS for frontend integration. Reads settings.CORS_ORIGINS (env
+# CORS_ORIGINS) instead of a hardcoded "*" — a wildcard combined with
+# allow_credentials=True is what browsers/some CORS specs treat as invalid,
+# and it defeated the point of locking origins down for production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- IN-MEMORY DATA STORES ---
+# --- SEED DATA (loaded into Postgres on first boot only — see init_db) ---
 
-BRANCHES = [
+SEED_BRANCHES = [
     {"id": "b1", "code": "KOL", "name": "Kolathur (Call Center Hub)", "city": "Chennai North", "type": "HOSPITAL", "status": "ACTIVE", "leadsToday": 142},
     {"id": "b2", "code": "CHP", "name": "Chetpet", "city": "Central Chennai", "type": "HOSPITAL", "status": "ACTIVE", "leadsToday": 98},
     {"id": "b3", "code": "VEL", "name": "Velachery", "city": "Chennai South", "type": "HOSPITAL", "status": "ACTIVE", "leadsToday": 115},
@@ -38,7 +49,7 @@ BRANCHES = [
     {"id": "b7", "code": "IVF", "name": "IVF Clinics Network", "city": "Multi-location", "type": "FERTILITY", "status": "ACTIVE", "leadsToday": 54},
 ]
 
-SLMS = [
+SEED_SLMS = [
     {"id": "slm-101", "name": "Vijay Kumar", "department": "Cardiology", "branchCode": "KOL", "phone": "+91 98400 11111", "activeLeads": 8, "avgTatMins": 8.4, "status": "ON_DUTY", "score": 96.5},
     {"id": "slm-102", "name": "Anitha Ramesh", "department": "IVF & Fertility", "branchCode": "CHP", "phone": "+91 94440 22222", "activeLeads": 6, "avgTatMins": 6.2, "status": "ON_DUTY", "score": 98.0},
     {"id": "slm-103", "name": "Suresh Babu", "department": "Orthopedics", "branchCode": "VEL", "phone": "+91 98840 33333", "activeLeads": 11, "avgTatMins": 11.1, "status": "ON_DUTY", "score": 91.2},
@@ -225,15 +236,76 @@ def send_fcm_notification(enquiry_id: str, assigned_slm: str, title: str, body: 
     print(f"--> [FCM PUSH SENT] to SLM [{assigned_slm}] for Enquiry [{enquiry_id}]: {title}")
     return True
 
-# --- POSTGRESQL-BACKED ENQUIRY STORE ---
+# --- POSTGRESQL-BACKED DATA STORES ---
 try:
     from .database import db_manager, get_db_session
-    from .models import Enquiry, EnquiryAction
+    from .models import Enquiry, EnquiryAction, Branch, SLM, User
 except ImportError:
     import sys, os
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     from database import db_manager, get_db_session
-    from models import Enquiry, EnquiryAction
+    from models import Enquiry, EnquiryAction, Branch, SLM, User
+
+
+# --- AUTH (JWT bearer tokens) ---
+# The API previously had no authentication at all — every endpoint,
+# including patient names/phones/call recordings, was reachable by anyone
+# on the network. This adds a minimal but real JWT auth layer: a single
+# ADMIN-role account (seeded on first boot, see init_db) protects every
+# route except "/" and the login endpoint itself.
+security = HTTPBearer()
+JWT_ALGORITHM = "HS256"
+
+
+def hash_password(plain: str) -> str:
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(plain: str, password_hash: str) -> bool:
+    return bcrypt.checkpw(plain.encode("utf-8"), password_hash.encode("utf-8"))
+
+
+def create_access_token(username: str) -> str:
+    expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": username, "exp": expire}
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db_session),
+) -> "User":
+    try:
+        payload = jwt.decode(credentials.credentials, settings.SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        username = payload.get("sub")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired, please log in again.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
+
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User no longer exists.")
+    return user
+
+
+class LoginSchema(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/v1/auth/login")
+def login(payload: LoginSchema, db: Session = Depends(get_db_session)):
+    user = db.query(User).filter(User.username == payload.username).first()
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    token = create_access_token(user.username)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expiresInMinutes": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+        "user": {"username": user.username, "role": user.role},
+    }
 
 
 def time_ago(dt: datetime) -> str:
@@ -296,6 +368,21 @@ def serialize_enquiry(enq: "Enquiry") -> dict:
     }
 
 
+def serialize_branch(b: "Branch") -> dict:
+    return {
+        "id": b.id, "code": b.code, "name": b.name, "city": b.city,
+        "type": b.type, "status": b.status, "leadsToday": b.leads_today,
+    }
+
+
+def serialize_slm(s: "SLM") -> dict:
+    return {
+        "id": s.id, "name": s.name, "department": s.department, "branchCode": s.branch_code,
+        "phone": s.phone, "activeLeads": s.active_leads, "avgTatMins": s.avg_tat_mins,
+        "status": s.status, "score": s.score,
+    }
+
+
 def log_action(db: Session, enquiry_id: str, action: str, performed_by: str, when: datetime = None):
     db.add(EnquiryAction(
         enquiry_id=enquiry_id,
@@ -334,6 +421,40 @@ def init_db():
     try:
         db.execute(text(f"SELECT pg_advisory_lock({STARTUP_LOCK_ID})"))
         Enquiry.metadata.create_all(bind=db_manager.engine)
+
+        if db.query(User).count() == 0:
+            db.add(User(
+                username=settings.ADMIN_USERNAME,
+                password_hash=hash_password(settings.ADMIN_PASSWORD),
+                role="ADMIN",
+            ))
+            db.commit()
+            if settings.ADMIN_PASSWORD == "ChangeMe123!":
+                print(f"⚠️  Seeded default admin user '{settings.ADMIN_USERNAME}' with the DEFAULT password — "
+                      f"set ADMIN_PASSWORD in .env and redeploy before any real use.")
+            else:
+                print(f"✅ Seeded admin user '{settings.ADMIN_USERNAME}' into PostgreSQL.")
+
+        if db.query(Branch).count() == 0:
+            for seed in SEED_BRANCHES:
+                db.add(Branch(
+                    id=seed["id"], code=seed["code"], name=seed["name"], city=seed["city"],
+                    type=seed["type"], status=seed["status"], leads_today=seed["leadsToday"],
+                ))
+            db.commit()
+            print(f"✅ Seeded {len(SEED_BRANCHES)} initial branches into PostgreSQL.")
+
+        if db.query(SLM).count() == 0:
+            for seed in SEED_SLMS:
+                db.add(SLM(
+                    id=seed["id"], name=seed["name"], department=seed["department"],
+                    branch_code=seed["branchCode"], phone=seed["phone"],
+                    active_leads=seed["activeLeads"], avg_tat_mins=seed["avgTatMins"],
+                    status=seed["status"], score=seed["score"],
+                ))
+            db.commit()
+            print(f"✅ Seeded {len(SEED_SLMS)} initial SLMs into PostgreSQL.")
+
         if db.query(Enquiry).count() == 0:
             for seed in SEED_ENQUIRIES:
                 created_at = datetime.utcnow() - timedelta(minutes=seed["age_offset_mins"])
@@ -396,47 +517,60 @@ def read_root(db: Session = Depends(get_db_session)):
         "activeEnquiriesCount": db.query(Enquiry).count()
     }
 
-# 1. BRANCHES
+# 1. BRANCHES (PostgreSQL-backed — see models.Branch)
 @app.get("/api/v1/db/pool-status")
-def get_db_pool_status():
+def get_db_pool_status(_user: User = Depends(get_current_user)):
     return db_manager.get_pool_status()
 
 @app.get("/api/v1/branches")
-def get_branches():
-    return {"branches": BRANCHES, "total": len(BRANCHES)}
+def get_branches(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    branches = db.query(Branch).order_by(Branch.id).all()
+    return {"branches": [serialize_branch(b) for b in branches], "total": len(branches)}
 
 @app.post("/api/v1/branches")
-def create_branch(payload: BranchCreateSchema):
-    for b in BRANCHES:
-        if b["code"].upper() == payload.code.upper():
-            raise HTTPException(status_code=400, detail=f"Branch code {payload.code} already exists.")
-    
-    new_branch = {
-        "id": f"b{len(BRANCHES)+1}",
-        "code": payload.code.upper(),
-        "name": payload.name,
-        "city": payload.city,
-        "type": payload.type,
-        "status": payload.status,
-        "leadsToday": 0
-    }
-    BRANCHES.append(new_branch)
-    return {"message": "Branch created successfully", "branch": new_branch}
+def create_branch(payload: BranchCreateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    if db.query(Branch).filter(func.upper(Branch.code) == payload.code.upper()).first():
+        raise HTTPException(status_code=400, detail=f"Branch code {payload.code} already exists.")
+
+    # Generate a "b<n>" id that doesn't collide with an existing row (a plain
+    # count+1, like the old in-memory version used, can reuse an id after a
+    # delete — e.g. delete b3 then add reissues b3 while b3's old data may
+    # still be referenced elsewhere).
+    existing_ids = {row[0] for row in db.query(Branch.id).all()}
+    n = len(existing_ids) + 1
+    while f"b{n}" in existing_ids:
+        n += 1
+    new_branch = Branch(
+        id=f"b{n}",
+        code=payload.code.upper(),
+        name=payload.name,
+        city=payload.city,
+        type=payload.type,
+        status=payload.status,
+        leads_today=0,
+    )
+    db.add(new_branch)
+    db.commit()
+    db.refresh(new_branch)
+    return {"message": "Branch created successfully", "branch": serialize_branch(new_branch)}
 
 @app.delete("/api/v1/branches/{branch_id}")
-def delete_branch(branch_id: str):
-    global BRANCHES
-    original_len = len(BRANCHES)
-    BRANCHES = [b for b in BRANCHES if b["id"] != branch_id and b["code"].upper() != branch_id.upper()]
-    if len(BRANCHES) == original_len:
+def delete_branch(branch_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    branch = db.query(Branch).filter(
+        (Branch.id == branch_id) | (func.upper(Branch.code) == branch_id.upper())
+    ).first()
+    if not branch:
         raise HTTPException(status_code=404, detail=f"Branch {branch_id} not found.")
+    db.delete(branch)
+    db.commit()
     return {"message": f"Branch {branch_id} deleted successfully"}
 
 
-# 2. SERVICE LINE MANAGERS (SLMs)
+# 2. SERVICE LINE MANAGERS (SLMs) (PostgreSQL-backed — see models.SLM)
 @app.get("/api/v1/slms")
-def get_slms():
-    return {"slms": SLMS, "total": len(SLMS)}
+def get_slms(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    slms = db.query(SLM).order_by(SLM.id).all()
+    return {"slms": [serialize_slm(s) for s in slms], "total": len(slms)}
 
 # 3. ENQUIRIES & LEAD MANAGEMENT (PostgreSQL-backed — see models.Enquiry)
 @app.get("/api/v1/enquiries")
@@ -445,7 +579,8 @@ def get_enquiries(
     status: Optional[str] = Query(None, description="Filter by status"),
     priority: Optional[str] = Query(None, description="Filter by priority URGENT/HIGH/MEDIUM"),
     search: Optional[str] = Query(None, description="Search patient name or phone"),
-    db: Session = Depends(get_db_session)
+    db: Session = Depends(get_db_session),
+    _user: User = Depends(get_current_user)
 ):
     query = db.query(Enquiry)
     if branchCode:
@@ -465,14 +600,14 @@ def get_enquiries(
     return {"enquiries": serialized, "total": len(serialized)}
 
 @app.get("/api/v1/enquiries/{enquiry_id}")
-def get_enquiry_by_id(enquiry_id: str, db: Session = Depends(get_db_session)):
+def get_enquiry_by_id(enquiry_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
     enq = db.query(Enquiry).filter(Enquiry.id == enquiry_id).first()
     if not enq:
         raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
     return {"enquiry": serialize_enquiry(enq)}
 
 @app.post("/api/v1/enquiries", status_code=status.HTTP_201_CREATED)
-def create_enquiry(payload: EnquiryCreate, db: Session = Depends(get_db_session)):
+def create_enquiry(payload: EnquiryCreate, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
     # Mandatory Remarks Check when status is CLOSED or CONVERTED
     if payload.status in ["CLOSED", "CONVERTED"] and not payload.remarks:
         raise HTTPException(
@@ -480,7 +615,8 @@ def create_enquiry(payload: EnquiryCreate, db: Session = Depends(get_db_session)
             detail="Mandatory remarks required when creating enquiry with status CLOSED or CONVERTED."
         )
 
-    matched_branch = next((b["name"] for b in BRANCHES if b["code"] == payload.branch_code.upper()), "Kolathur (Call Center Hub)")
+    branch_row = db.query(Branch).filter(Branch.code == payload.branch_code.upper()).first()
+    matched_branch = branch_row.name if branch_row else "Kolathur (Call Center Hub)"
     assigned_slm = payload.assigned_slm or "Auto-Routed SLM"
     now = datetime.utcnow()
 
@@ -532,13 +668,14 @@ def create_enquiry(payload: EnquiryCreate, db: Session = Depends(get_db_session)
     return {"message": "Enquiry created successfully", "enquiry": serialize_enquiry(new_enquiry)}
 
 @app.post("/api/v1/xtend/simulate-call")
-def simulate_xtend_call(payload: XtendCallSimulationSchema, db: Session = Depends(get_db_session)):
+def simulate_xtend_call(payload: XtendCallSimulationSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
     branch_code = payload.selectedBranchCode or random.choice(["KOL", "CHP", "VEL", "GUM", "IVF"])
-    matched_branch = next((b["name"] for b in BRANCHES if b["code"] == branch_code), "Kolathur (Call Center Hub)")
+    branch_row = db.query(Branch).filter(Branch.code == branch_code).first()
+    matched_branch = branch_row.name if branch_row else "Kolathur (Call Center Hub)"
     dept = payload.department or random.choice(["Cardiology", "IVF & Fertility", "Orthopedics", "Obstetrics & Gynecology"])
 
-    assigned_slm = next((f"{s['name']} (SLM {s['department']})" for s in SLMS if s["branchCode"] == branch_code), "Vijay Kumar (SLM Cardio)")
-    slm_obj = next((s for s in SLMS if s["branchCode"] == branch_code), SLMS[0])
+    slm_obj = db.query(SLM).filter(SLM.branch_code == branch_code).first() or db.query(SLM).first()
+    assigned_slm = f"{slm_obj.name} (SLM {slm_obj.department})" if slm_obj else "Vijay Kumar (SLM Cardio)"
 
     disposition = payload.disposition or "CALLBACK_REQUESTED"
     now = datetime.utcnow()
@@ -561,7 +698,7 @@ def simulate_xtend_call(payload: XtendCallSimulationSchema, db: Session = Depend
             priority=random.choice(["URGENT", "HIGH", "MEDIUM"]),
             status="NEW",
             assigned_slm=assigned_slm,
-            slm_id=slm_obj["id"],
+            slm_id=slm_obj.id if slm_obj else "slm-101",
             audio_duration="2m 10s",
             recording_url="wav_8801.wav",
             recording_path="wav_8801.wav",
@@ -604,7 +741,7 @@ def simulate_xtend_call(payload: XtendCallSimulationSchema, db: Session = Depend
     }
 
 @app.patch("/api/v1/enquiries/{enquiry_id}")
-def update_enquiry(enquiry_id: str, payload: EnquiryUpdateSchema, db: Session = Depends(get_db_session)):
+def update_enquiry(enquiry_id: str, payload: EnquiryUpdateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
     enq = db.query(Enquiry).filter(Enquiry.id == enquiry_id).first()
     if not enq:
         raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
@@ -644,7 +781,7 @@ def update_enquiry(enquiry_id: str, payload: EnquiryUpdateSchema, db: Session = 
     return {"message": "Enquiry updated successfully", "enquiry": serialize_enquiry(enq)}
 
 @app.post("/api/v1/enquiries/{enquiry_id}/simulate-escalation")
-def simulate_sla_escalation(enquiry_id: str, db: Session = Depends(get_db_session)):
+def simulate_sla_escalation(enquiry_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
     enq = db.query(Enquiry).filter(Enquiry.id == enquiry_id).first()
     if not enq:
         raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
@@ -664,7 +801,7 @@ def simulate_sla_escalation(enquiry_id: str, db: Session = Depends(get_db_sessio
 
 # 4. LEADERSHIP ANALYTICS
 @app.get("/api/v1/analytics/overview")
-def get_analytics_overview(db: Session = Depends(get_db_session)):
+def get_analytics_overview(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
     total_inquiries = 457
     avg_tat = 9.2
     surgeries = 127
@@ -677,13 +814,13 @@ def get_analytics_overview(db: Session = Depends(get_db_session)):
         "surgeriesAndSlotsFixed": surgeries,
         "conversionRate": conversion,
         "slaBreachAlerts": sla_breaches,
-        "branchesCount": len(BRANCHES),
-        "activeSlmsCount": len(SLMS)
+        "branchesCount": db.query(Branch).count(),
+        "activeSlmsCount": db.query(SLM).filter(SLM.status == "ON_DUTY").count()
     }
 
 # 5. CALL RECORDING AUDIO PROXY (Generates real WAV audio stream on-the-fly)
 @app.get("/api/v1/recordings/{filename}")
-def get_call_audio(filename: str):
+def get_call_audio(filename: str, _user: User = Depends(get_current_user)):
     sample_rate = 8000
     duration_secs = 3.0
     num_samples = int(sample_rate * duration_secs)

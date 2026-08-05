@@ -1,11 +1,13 @@
 import urllib.request
 import json
 import random
+from test_auth_helper import install_auth_opener
 
 BACKEND_URL = "http://localhost:8000"
 FRONTEND_PROXY_URL = "http://localhost:5173"
 
 def main():
+    install_auth_opener(BACKEND_URL)
     print("=" * 60)
     print("🏥 PRASHANTH HOSPITALS — END-TO-END ENDPOINT SUITE VERIFICATION")
     print("=" * 60)

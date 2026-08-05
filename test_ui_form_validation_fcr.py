@@ -1,6 +1,7 @@
 import urllib.request
 import json
 import time
+from test_auth_helper import install_auth_opener
 
 FRONTEND_PROXY_URL = "http://localhost:5173"
 BACKEND_URL = "http://localhost:8000"
@@ -10,6 +11,7 @@ def log(msg, status="INFO"):
     print(f"{symbol} [{status}] {msg}")
 
 def main():
+    install_auth_opener(BACKEND_URL)
     print("=" * 80)
     print("🏥 PRASHANTH HOSPITALS — MANDATORY REMARKS & FCR BYPASS VALIDATION AUDIT")
     print("=" * 80)

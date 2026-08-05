@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Phone, MessageSquare, UserCheck, Play, Pause, Clock, Search, Filter, RefreshCw, CheckCircle, ListOrdered, Calendar } from 'lucide-react';
 import { MOCK_ENQUIRIES } from '../data/mockData';
-
-const API_BASE = '/api/v1';
+import { apiFetch, API_BASE } from '../api';
 
 export default function SLMMobileSimulator() {
   const [enquiries, setEnquiries] = useState(MOCK_ENQUIRIES);
@@ -21,7 +20,7 @@ export default function SLMMobileSimulator() {
   // Fetch live enquiries from FastAPI backend
   const fetchEnquiries = async () => {
     try {
-      const res = await fetch(`${API_BASE}/enquiries`);
+      const res = await apiFetch(`${API_BASE}/enquiries`);
       if (res.ok) {
         const data = await res.json();
         if (data.enquiries && data.enquiries.length > 0) {
@@ -95,7 +94,7 @@ export default function SLMMobileSimulator() {
     registerNewAction(`Status updated to ${newStatus.replace('_', ' ')} with remarks: "${remarks || 'None'}"`, selectedEnquiry.assignedSLM || 'SLM Agent');
 
     try {
-      await fetch(`${API_BASE}/enquiries/${selectedEnquiry.id}`, {
+      await apiFetch(`${API_BASE}/enquiries/${selectedEnquiry.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -153,7 +152,7 @@ export default function SLMMobileSimulator() {
   const handleSimulateCall = async () => {
     setLoadingSim(true);
     try {
-      const res = await fetch(`${API_BASE}/xtend/simulate-call`, {
+      const res = await apiFetch(`${API_BASE}/xtend/simulate-call`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

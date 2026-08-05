@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Boolean, Text, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, Float, Boolean, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 
 try:
@@ -8,6 +8,53 @@ except ImportError:
     from database import db_manager
 
 Base = db_manager.Base
+
+
+class Branch(Base):
+    """Hospital branch record. Previously an in-process list — a backend
+    restart silently reverted any Add/Delete Branch action back to the
+    hardcoded seed, which defeats the point of having Delete Branch at all."""
+    __tablename__ = "branches"
+
+    id = Column(String, primary_key=True, index=True)
+    code = Column(String, unique=True, index=True)
+    name = Column(String, nullable=False)
+    city = Column(String)
+    type = Column(String, default="HOSPITAL")
+    status = Column(String, default="ACTIVE")
+    leads_today = Column(Integer, default=0)
+
+
+class SLM(Base):
+    """Service Line Manager roster record."""
+    __tablename__ = "slms"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    department = Column(String)
+    branch_code = Column(String, index=True)
+    phone = Column(String)
+    active_leads = Column(Integer, default=0)
+    avg_tat_mins = Column(Float, default=0)
+    status = Column(String, default="ON_DUTY")
+    score = Column(Float, default=0)
+
+
+class User(Base):
+    """Login account for the leadership dashboard / SLM console.
+
+    MVP-scope auth: a single shared role model (ADMIN) is enough to close
+    off the previously-open API (any endpoint was reachable by anyone on
+    the network with no credentials at all). Per-SLM individual accounts
+    with scoped permissions would be a reasonable follow-up, not required
+    to stop the immediate data-exposure problem."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, default="ADMIN")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Enquiry(Base):

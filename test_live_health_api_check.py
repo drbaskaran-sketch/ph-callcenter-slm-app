@@ -1,18 +1,20 @@
 import urllib.request
 import json
 import time
+from test_auth_helper import install_auth_opener
 
 def log(msg, status="INFO"):
     symbol = "ℹ️" if status == "INFO" else ("✅" if status == "SUCCESS" else "❌")
     print(f"{symbol} [{status}] {msg}")
 
 def main():
+    base_backend = "http://localhost:8000"
+    base_frontend = "http://localhost:5173"
+    install_auth_opener(base_backend)
+
     print("=" * 80)
     print("🏥 PRASHANTH HOSPITALS — LIVE HEALTH & XTEND DB2 API AUDIT")
     print("=" * 80)
-
-    base_backend = "http://localhost:8000"
-    base_frontend = "http://localhost:5173"
 
     # 1. Audit Live DB Connection Pool & XTEND DB2 Hub Connection
     print("\n1️⃣  Auditing Operational DB Connection Pool & XTEND DB2 Hub Status...")

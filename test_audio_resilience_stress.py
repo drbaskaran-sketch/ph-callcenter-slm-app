@@ -3,9 +3,11 @@ import socket
 import concurrent.futures
 import time
 import json
+from test_auth_helper import install_auth_opener
 
 FRONTEND_PROXY_URL = "http://localhost:5173"
 BACKEND_URL = "http://localhost:8000"
+_AUTH_TOKEN = None  # set in main() via install_auth_opener(); used by the raw-socket test below
 
 def log(msg, status="INFO"):
     symbol = "ℹ️" if status == "INFO" else ("✅" if status == "SUCCESS" else ("⚠️" if status == "WARN" else "❌"))
@@ -45,8 +47,10 @@ def simulate_abrupt_client_disconnect():
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(("localhost", 5173))
         
-        # Send HTTP GET request
-        http_req = "GET /api/v1/recordings/wav_8801.wav HTTP/1.1\r\nHost: localhost:5173\r\nConnection: keep-alive\r\n\r\n"
+        # Send HTTP GET request (with the bearer token — this endpoint is
+        # now auth-protected like everything else)
+        auth_header = f"Authorization: Bearer {_AUTH_TOKEN}\r\n" if _AUTH_TOKEN else ""
+        http_req = f"GET /api/v1/recordings/wav_8801.wav HTTP/1.1\r\nHost: localhost:5173\r\n{auth_header}Connection: keep-alive\r\n\r\n"
         s.sendall(http_req.encode("utf-8"))
         
         # Read only first 128 bytes then forcefully reset / close socket
@@ -93,6 +97,8 @@ def test_exception_handling():
     return passed == len(invalid_cases)
 
 def main():
+    global _AUTH_TOKEN
+    _AUTH_TOKEN = install_auth_opener(BACKEND_URL)
     print("=" * 80)
     print("🏥 PRASHANTH HOSPITALS — AUDIO STREAM STRESS TEST & ERROR RESILIENCE AUDIT")
     print("=" * 80)
