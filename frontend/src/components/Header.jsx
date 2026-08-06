@@ -1,5 +1,5 @@
 import React from 'react';
-import { PhoneCall, Building2, Smartphone, Activity, UserCircle, LogOut } from 'lucide-react';
+import { PhoneCall, Building2, Smartphone, Activity, UserCircle, LogOut, Users, ShieldAlert, MessageSquare } from 'lucide-react';
 
 export default function Header({ activeTab, setActiveTab, user, onLogout }) {
   return (
@@ -66,6 +66,42 @@ export default function Header({ activeTab, setActiveTab, user, onLogout }) {
             >
               <Building2 className="w-4 h-4" />
               <span>Branch Matrix</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('users')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'users'
+                  ? 'bg-teal-700 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>User Master</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('sla')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'sla'
+                  ? 'bg-teal-700 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+              }`}
+            >
+              <ShieldAlert className="w-4 h-4" />
+              <span>SLA Governance</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('reports')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'reports'
+                  ? 'bg-teal-700 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>Notifications & Reports</span>
             </button>
           </div>
 

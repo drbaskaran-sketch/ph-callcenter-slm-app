@@ -4,6 +4,9 @@ import Login from './components/Login';
 import SLMMobileSimulator from './components/SLMMobileSimulator';
 import LeadershipDashboard from './components/LeadershipDashboard';
 import BranchMatrix from './components/BranchMatrix';
+import UserManagement from './components/UserManagement';
+import SLAGovernanceDashboard from './components/SLAGovernanceDashboard';
+import NotificationsAndReports from './components/NotificationsAndReports';
 import { getToken, getStoredUser, clearSession } from './api';
 
 export default function App() {
@@ -36,6 +39,9 @@ export default function App() {
           {activeTab === 'simulator' && <SLMMobileSimulator />}
           {activeTab === 'dashboard' && <LeadershipDashboard />}
           {activeTab === 'branches' && <BranchMatrix />}
+          {activeTab === 'users' && <UserManagement />}
+          {activeTab === 'sla' && <SLAGovernanceDashboard />}
+          {activeTab === 'reports' && <NotificationsAndReports />}
         </main>
       </div>
 

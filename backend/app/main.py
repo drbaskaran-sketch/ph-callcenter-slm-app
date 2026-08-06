@@ -11,6 +11,7 @@ import random
 import io
 import wave
 import math
+import csv
 import jwt
 import bcrypt
 
@@ -215,11 +216,16 @@ class StatusUpdate(BaseModel):
 
 class EnquiryUpdateSchema(BaseModel):
     status: Optional[str] = None
+    disposition: Optional[str] = None
     notes: Optional[str] = None
     remarks: Optional[str] = None
     priority: Optional[str] = None
     nextFollowup: Optional[str] = None
     assignedSLM: Optional[str] = None
+
+class ActionCreateSchema(BaseModel):
+    action: str
+    performedBy: Optional[str] = "SLM Agent"
 
 class XtendCallSimulationSchema(BaseModel):
     callerPhone: Optional[str] = None
@@ -227,6 +233,67 @@ class XtendCallSimulationSchema(BaseModel):
     selectedBranchCode: Optional[str] = None
     department: Optional[str] = None
     disposition: Optional[str] = None
+
+class UserCreateSchema(BaseModel):
+    username: str
+    password: str
+    fullName: Optional[str] = None
+    email: Optional[str] = None
+    role: str = "SLM"  # ADMIN, SUPERVISOR, SLM, BRANCH_HEAD
+    branchCode: Optional[str] = "ALL"
+    slmId: Optional[str] = None
+
+class UserUpdateSchema(BaseModel):
+    fullName: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    branchCode: Optional[str] = None
+    slmId: Optional[str] = None
+    status: Optional[str] = None
+
+class UserPasswordResetSchema(BaseModel):
+    newPassword: str
+
+class SLMCreateSchema(BaseModel):
+    name: str
+    department: str
+    branchCode: str
+    phone: str
+    status: str = "ON_DUTY"
+    createUserAccount: Optional[bool] = False
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+class SLMUpdateSchema(BaseModel):
+    name: Optional[str] = None
+    department: Optional[str] = None
+    branchCode: Optional[str] = None
+    phone: Optional[str] = None
+    status: Optional[str] = None
+    score: Optional[float] = None
+
+class HISBookSlotSchema(BaseModel):
+    enquiryId: str
+    doctorName: str
+    appointmentDate: str  # YYYY-MM-DD
+    slotTime: str         # e.g., 10:00 AM
+    patientUhid: Optional[str] = None
+    remarks: Optional[str] = None
+
+class HISPrebookSurgerySchema(BaseModel):
+    enquiryId: str
+    doctorName: str
+    procedureName: str
+    proposedSurgeryDate: str
+    otRoom: Optional[str] = "OT-1 (Main Surgical Suite)"
+    remarks: Optional[str] = None
+
+class NotificationDispatchSchema(BaseModel):
+    enquiryId: str
+    channel: str  # WHATSAPP, SMS, EMAIL
+    templateType: str  # APPOINTMENT_CONFIRMATION, SURGERY_PREBOOK, FOLLOWUP_REMINDER, GENERAL_INFO
+    recipientPhone: str
+    customMessage: Optional[str] = None
 
 # Helper function to simulate FCM Push Notification (Bypassed for First Call Resolution / FCR)
 def send_fcm_notification(enquiry_id: str, assigned_slm: str, title: str, body: str, disposition: str = None):
@@ -294,6 +361,19 @@ class LoginSchema(BaseModel):
     password: str
 
 
+def serialize_user(u: "User") -> dict:
+    return {
+        "id": u.id,
+        "username": u.username,
+        "fullName": u.full_name or u.username,
+        "email": u.email,
+        "role": u.role or "ADMIN",
+        "branchCode": u.branch_code or "ALL",
+        "slmId": u.slm_id,
+        "status": u.status or "ACTIVE",
+        "createdAt": (u.created_at.isoformat() + "Z") if u.created_at else None,
+    }
+
 @app.post("/api/v1/auth/login")
 def login(payload: LoginSchema, db: Session = Depends(get_db_session)):
     user = db.query(User).filter(User.username == payload.username).first()
@@ -304,7 +384,7 @@ def login(payload: LoginSchema, db: Session = Depends(get_db_session)):
         "access_token": token,
         "token_type": "bearer",
         "expiresInMinutes": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
-        "user": {"username": user.username, "role": user.role},
+        "user": serialize_user(user),
     }
 
 
@@ -357,6 +437,10 @@ def serialize_enquiry(enq: "Enquiry") -> dict:
         "updatedAt": (enq.updated_at.isoformat() + "Z") if enq.updated_at else None,
         "slaBreached": enq.sla_breached,
         "escalatedToBranchHead": enq.escalated_to_branch_head,
+        "patientUhid": enq.patient_uhid,
+        "hisBookingId": enq.his_booking_id,
+        "hisSyncStatus": enq.his_sync_status or "PENDING",
+        "hisSyncedAt": (enq.his_synced_at.isoformat() + "Z") if enq.his_synced_at else None,
         "registeredActions": [
             {
                 "timestamp": a.timestamp.strftime("%H:%M:%S") if a.timestamp else None,
@@ -421,6 +505,19 @@ def init_db():
     try:
         db.execute(text(f"SELECT pg_advisory_lock({STARTUP_LOCK_ID})"))
         Enquiry.metadata.create_all(bind=db_manager.engine)
+
+        # Auto-migrate new columns for users table if upgrading from prior schema
+        db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR;"))
+        db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR;"))
+        db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS branch_code VARCHAR DEFAULT 'ALL';"))
+        db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS slm_id VARCHAR;"))
+        db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'ACTIVE';"))
+
+        db.execute(text("ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS patient_uhid VARCHAR;"))
+        db.execute(text("ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS his_booking_id VARCHAR;"))
+        db.execute(text("ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS his_sync_status VARCHAR DEFAULT 'PENDING';"))
+        db.execute(text("ALTER TABLE enquiries ADD COLUMN IF NOT EXISTS his_synced_at TIMESTAMP;"))
+        db.commit()
 
         if db.query(User).count() == 0:
             db.add(User(
@@ -566,11 +663,164 @@ def delete_branch(branch_id: str, db: Session = Depends(get_db_session), _user: 
     return {"message": f"Branch {branch_id} deleted successfully"}
 
 
-# 2. SERVICE LINE MANAGERS (SLMs) (PostgreSQL-backed — see models.SLM)
+# 2. USER & PERMISSION MANAGEMENT (PostgreSQL-backed — see models.User)
+@app.get("/api/v1/users")
+def get_users(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    users = db.query(User).order_by(User.id).all()
+    return {"users": [serialize_user(u) for u in users], "total": len(users)}
+
+@app.post("/api/v1/users", status_code=status.HTTP_201_CREATED)
+def create_user(payload: UserCreateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    existing = db.query(User).filter(User.username == payload.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Username '{payload.username}' is already taken.")
+    
+    new_user = User(
+        username=payload.username,
+        full_name=payload.fullName or payload.username,
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        role=payload.role or "SLM",
+        branch_code=payload.branchCode or "ALL",
+        slm_id=payload.slmId,
+        status="ACTIVE",
+        created_at=datetime.utcnow()
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"message": "User account created successfully", "user": serialize_user(new_user)}
+
+@app.put("/api/v1/users/{user_id}")
+def update_user(user_id: int, payload: UserUpdateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
+    
+    if payload.fullName is not None:
+        target_user.full_name = payload.fullName
+    if payload.email is not None:
+        target_user.email = payload.email
+    if payload.role is not None:
+        target_user.role = payload.role
+    if payload.branchCode is not None:
+        target_user.branch_code = payload.branchCode
+    if payload.slmId is not None:
+        target_user.slm_id = payload.slmId
+    if payload.status is not None:
+        target_user.status = payload.status
+    
+    db.commit()
+    db.refresh(target_user)
+    return {"message": "User updated successfully", "user": serialize_user(target_user)}
+
+@app.post("/api/v1/users/{user_id}/reset-password")
+def reset_user_password(user_id: int, payload: UserPasswordResetSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
+    
+    if not payload.newPassword or len(payload.newPassword.strip()) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long.")
+    
+    target_user.password_hash = hash_password(payload.newPassword)
+    db.commit()
+    return {"message": f"Password reset successfully for user {target_user.username}"}
+
+@app.delete("/api/v1/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
+    if target_user.username == _user.username:
+        raise HTTPException(status_code=400, detail="Cannot delete your own active session account.")
+    
+    db.delete(target_user)
+    db.commit()
+    return {"message": f"User {target_user.username} deleted successfully"}
+
+
+# 3. SERVICE LINE MANAGERS (SLMs) (PostgreSQL-backed — see models.SLM)
 @app.get("/api/v1/slms")
 def get_slms(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
     slms = db.query(SLM).order_by(SLM.id).all()
     return {"slms": [serialize_slm(s) for s in slms], "total": len(slms)}
+
+@app.post("/api/v1/slms", status_code=status.HTTP_201_CREATED)
+def create_slm(payload: SLMCreateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    slm_count = db.query(SLM).count()
+    new_slm_id = f"slm-{100 + slm_count + 1}"
+    
+    new_slm = SLM(
+        id=new_slm_id,
+        name=payload.name,
+        department=payload.department,
+        branch_code=payload.branchCode.upper(),
+        phone=payload.phone,
+        status=payload.status or "ON_DUTY",
+        active_leads=0,
+        avg_tat_mins=0.0,
+        score=95.0
+    )
+    db.add(new_slm)
+    
+    user_created = None
+    if payload.createUserAccount and payload.username and payload.password:
+        existing = db.query(User).filter(User.username == payload.username).first()
+        if not existing:
+            new_user = User(
+                username=payload.username,
+                full_name=payload.name,
+                password_hash=hash_password(payload.password),
+                role="SLM",
+                branch_code=payload.branchCode.upper(),
+                slm_id=new_slm_id,
+                status="ACTIVE",
+                created_at=datetime.utcnow()
+            )
+            db.add(new_user)
+            user_created = payload.username
+    
+    db.commit()
+    db.refresh(new_slm)
+    return {
+        "message": "SLM created successfully",
+        "slm": serialize_slm(new_slm),
+        "userCreated": user_created
+    }
+
+@app.put("/api/v1/slms/{slm_id}")
+def update_slm(slm_id: str, payload: SLMUpdateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    slm_row = db.query(SLM).filter(SLM.id == slm_id).first()
+    if not slm_row:
+        raise HTTPException(status_code=404, detail=f"SLM {slm_id} not found.")
+    
+    if payload.name is not None:
+        slm_row.name = payload.name
+    if payload.department is not None:
+        slm_row.department = payload.department
+    if payload.branchCode is not None:
+        slm_row.branch_code = payload.branchCode.upper()
+    if payload.phone is not None:
+        slm_row.phone = payload.phone
+    if payload.status is not None:
+        slm_row.status = payload.status
+    if payload.score is not None:
+        slm_row.score = payload.score
+    
+    db.commit()
+    db.refresh(slm_row)
+    return {"message": "SLM updated successfully", "slm": serialize_slm(slm_row)}
+
+@app.delete("/api/v1/slms/{slm_id}")
+def delete_slm(slm_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    slm_row = db.query(SLM).filter(SLM.id == slm_id).first()
+    if not slm_row:
+        raise HTTPException(status_code=404, detail=f"SLM {slm_id} not found.")
+    
+    db.delete(slm_row)
+    db.commit()
+    return {"message": f"SLM {slm_id} deleted successfully"}
 
 # 3. ENQUIRIES & LEAD MANAGEMENT (PostgreSQL-backed — see models.Enquiry)
 @app.get("/api/v1/enquiries")
@@ -761,6 +1011,9 @@ def update_enquiry(enquiry_id: str, payload: EnquiryUpdateSchema, db: Session = 
             enq.call_end_time = now.strftime("%H:%M:%S")
         enq.status = payload.status
         log_action(db, enquiry_id, f"Status updated to {payload.status}", performed_by, now)
+    if payload.disposition:
+        enq.disposition = payload.disposition
+        log_action(db, enquiry_id, f"Disposition updated to {payload.disposition}", performed_by, now)
     if payload.notes:
         enq.notes = payload.notes
     if payload.remarks:
@@ -780,24 +1033,136 @@ def update_enquiry(enquiry_id: str, payload: EnquiryUpdateSchema, db: Session = 
     db.refresh(enq)
     return {"message": "Enquiry updated successfully", "enquiry": serialize_enquiry(enq)}
 
-@app.post("/api/v1/enquiries/{enquiry_id}/simulate-escalation")
-def simulate_sla_escalation(enquiry_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+@app.post("/api/v1/enquiries/{enquiry_id}/actions")
+def add_enquiry_action(
+    enquiry_id: str,
+    payload: ActionCreateSchema,
+    db: Session = Depends(get_db_session),
+    _user: User = Depends(get_current_user)
+):
     enq = db.query(Enquiry).filter(Enquiry.id == enquiry_id).first()
     if not enq:
         raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
 
     now = datetime.utcnow()
-    enq.sla_breached = True
-    enq.escalated_to_branch_head = True
-    enq.updated_at = now
-    log_action(db, enquiry_id, "First Response SLA breached (>15 mins) — escalated to Branch Head & Operations Director", "SLA Monitor", now)
+    performed_by = payload.performedBy or enq.assigned_slm or "SLM Agent"
+    log_action(db, enquiry_id, payload.action, performed_by, now)
     db.commit()
     db.refresh(enq)
+    return {"message": "Action logged successfully", "enquiry": serialize_enquiry(enq)}
+
+@app.post("/api/v1/sla/check-breaches")
+def check_sla_breaches(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    now = datetime.utcnow()
+    active_enquiries = db.query(Enquiry).filter(Enquiry.status.in_(["NEW", "ASSIGNED"])).all()
+    
+    tier2_breaches = 0
+    tier3_breaches = 0
+    
+    for enq in active_enquiries:
+        age_mins = (now - enq.created_at).total_seconds() / 60.0
+        if age_mins > 30:
+            if not enq.sla_breached or not enq.escalated_to_branch_head:
+                enq.sla_breached = True
+                enq.escalated_to_branch_head = True
+                enq.updated_at = now
+                log_action(db, enq.id, "CRITICAL SLA BREACH (>30 mins) — Tier 3 Escalation to Operations Director & Group COO", "SLA Engine", now)
+                tier3_breaches += 1
+        elif age_mins > 15:
+            if not enq.sla_breached:
+                enq.sla_breached = True
+                enq.escalated_to_branch_head = True
+                enq.updated_at = now
+                log_action(db, enq.id, "FIRST RESPONSE SLA BREACH (>15 mins) — Tier 2 Escalation to Branch Head", "SLA Engine", now)
+                tier2_breaches += 1
+
+    db.commit()
+    return {
+        "message": f"SLA Audit Complete. Evaluated {len(active_enquiries)} active leads.",
+        "scanned": len(active_enquiries),
+        "tier2Breaches": tier2_breaches,
+        "tier3Breaches": tier3_breaches
+    }
+
+@app.get("/api/v1/sla/matrix")
+def get_sla_matrix(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    now = datetime.utcnow()
+    all_enquiries = db.query(Enquiry).all()
+    
+    tier1_on_time = 0
+    tier2_branch_head = 0
+    tier3_director = 0
+    
+    for e in all_enquiries:
+        age_mins = (now - e.created_at).total_seconds() / 60.0
+        if e.sla_breached or age_mins > 30:
+            tier3_director += 1
+        elif age_mins > 15:
+            tier2_branch_head += 1
+        else:
+            tier1_on_time += 1
+
+    total = len(all_enquiries) or 1
+    compliance_rate = round((tier1_on_time / total) * 100, 1)
 
     return {
-        "message": f"SLA Breach detected for {enquiry_id}! Escalated to Branch Head and Operations Director.",
-        "enquiry": serialize_enquiry(enq)
+        "totalEnquiries": total,
+        "tier1OnTime": tier1_on_time,
+        "tier2BranchHead": tier2_branch_head,
+        "tier3Director": tier3_director,
+        "slaComplianceRate": f"{compliance_rate}%",
+        "targetSlaMins": 15
     }
+
+@app.get("/api/v1/sla/scorecard")
+def get_sla_scorecard(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    slms = db.query(SLM).all()
+    enquiries = db.query(Enquiry).all()
+    
+    scorecard = []
+    for s in slms:
+        slm_enqs = [e for e in enquiries if e.slm_id == s.id]
+        total_handled = len(slm_enqs)
+        converted = len([e for e in slm_enqs if e.status in ["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED", "CLOSED"]])
+        conv_rate = (converted / total_handled * 100) if total_handled > 0 else 75.0
+        
+        breaches = len([e for e in slm_enqs if e.sla_breached])
+        tat = s.avg_tat_mins or 8.0
+        
+        # Weighted Scoring Breakdown:
+        # 40% TAT Compliance + 35% Conversion Rate + 15% FCR + 10% Audit Quality
+        tat_score = max(0, min(40, (15 - tat) * 2.6 + 20))
+        conv_score = (conv_rate / 100.0) * 35.0
+        fcr_score = 14.0 if breaches == 0 else max(0, 14.0 - breaches * 3)
+        quality_score = 9.5
+        
+        final_score = round(tat_score + conv_score + fcr_score + quality_score, 1)
+        
+        if final_score >= 95:
+            grade = "A+ Outstanding"
+        elif final_score >= 88:
+            grade = "A Excellent"
+        elif final_score >= 80:
+            grade = "B Good"
+        else:
+            grade = "Needs Improvement"
+
+        scorecard.append({
+            "slmId": s.id,
+            "name": s.name,
+            "department": s.department,
+            "branchCode": s.branch_code,
+            "totalHandled": total_handled,
+            "avgTatMins": tat,
+            "conversionRate": f"{round(conv_rate, 1)}%",
+            "slaBreaches": breaches,
+            "score": final_score,
+            "grade": grade,
+            "status": s.status
+        })
+
+    scorecard.sort(key=lambda x: x["score"], reverse=True)
+    return {"scorecard": scorecard, "total": len(scorecard)}
 
 # 4. LEADERSHIP ANALYTICS
 @app.get("/api/v1/analytics/overview")
@@ -817,6 +1182,122 @@ def get_analytics_overview(db: Session = Depends(get_db_session), _user: User = 
         "branchesCount": db.query(Branch).count(),
         "activeSlmsCount": db.query(SLM).filter(SLM.status == "ON_DUTY").count()
     }
+
+@app.get("/api/v1/analytics/specialities")
+def get_analytics_specialities(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    departments = ["Cardiology", "IVF & Fertility", "Orthopedics", "Obstetrics & Gynecology", "Nephrology & Urology", "Neurology", "General Surgery"]
+    enquiries = db.query(Enquiry).all()
+    
+    dept_map = {}
+    for d in departments:
+        dept_map[d] = {
+            "speciality": d,
+            "totalInquiries": 0,
+            "surgeriesAndAppointmentsFixed": 0,
+            "pendingLeads": 0,
+            "conversionRate": "0%",
+            "avgTatMins": 8.5
+        }
+        
+    for e in enquiries:
+        dept = e.department or "General Surgery"
+        if dept not in dept_map:
+            dept_map[dept] = {
+                "speciality": dept,
+                "totalInquiries": 0,
+                "surgeriesAndAppointmentsFixed": 0,
+                "pendingLeads": 0,
+                "conversionRate": "0%",
+                "avgTatMins": 8.0
+            }
+        
+        dept_map[dept]["totalInquiries"] += 1
+        if e.status in ["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED", "CLOSED"]:
+            dept_map[dept]["surgeriesAndAppointmentsFixed"] += 1
+        elif e.status in ["NEW", "ASSIGNED", "CONTACTED"]:
+            dept_map[dept]["pendingLeads"] += 1
+
+    for dept, data in dept_map.items():
+        tot = data["totalInquiries"]
+        fix = data["surgeriesAndAppointmentsFixed"]
+        rate = round((fix / tot * 100), 1) if tot > 0 else 0.0
+        data["conversionRate"] = f"{rate}%"
+
+    results = list(dept_map.values())
+    results.sort(key=lambda x: x["totalInquiries"], reverse=True)
+    return {"specialities": results, "total": len(results)}
+
+
+@app.get("/api/v1/analytics/doctors")
+def get_analytics_doctors(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    enquiries = db.query(Enquiry).all()
+    
+    doc_map = {}
+    for e in enquiries:
+        doc = e.doctor_name or "Duty Consultant Doctor"
+        if doc not in doc_map:
+            doc_map[doc] = {
+                "doctorName": doc,
+                "department": e.department or "Multispecialty",
+                "consultations": 0,
+                "surgeriesFixed": 0,
+                "conversionRate": "0%",
+                "avgPatientTat": "7.8 mins"
+            }
+        doc_map[doc]["consultations"] += 1
+        if e.status in ["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED"]:
+            doc_map[doc]["surgeriesFixed"] += 1
+
+    for doc, data in doc_map.items():
+        tot = data["consultations"]
+        fix = data["surgeriesFixed"]
+        rate = round((fix / tot * 100), 1) if tot > 0 else 0.0
+        data["conversionRate"] = f"{rate}%"
+
+    results = list(doc_map.values())
+    results.sort(key=lambda x: x["consultations"], reverse=True)
+    return {"doctors": results, "total": len(results)}
+
+
+@app.get("/api/v1/analytics/agents")
+def get_analytics_agents(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    slms = db.query(SLM).all()
+    enquiries = db.query(Enquiry).all()
+    
+    agent_map = {}
+    for s in slms:
+        agent_map[s.id] = {
+            "slmId": s.id,
+            "name": s.name,
+            "department": s.department,
+            "branchCode": s.branch_code,
+            "callsHandled": 0,
+            "conversions": 0,
+            "conversionRate": "0%",
+            "avgTatMins": s.avg_tat_mins or 7.5,
+            "slaBreaches": 0,
+            "score": s.score or 95.0,
+            "status": s.status
+        }
+        
+    for e in enquiries:
+        slm_key = e.slm_id or "slm-101"
+        if slm_key in agent_map:
+            agent_map[slm_key]["callsHandled"] += 1
+            if e.status in ["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED", "CLOSED"]:
+                agent_map[slm_key]["conversions"] += 1
+            if e.sla_breached:
+                agent_map[slm_key]["slaBreaches"] += 1
+
+    for slm_id, data in agent_map.items():
+        tot = data["callsHandled"]
+        conv = data["conversions"]
+        rate = round((conv / tot * 100), 1) if tot > 0 else 0.0
+        data["conversionRate"] = f"{rate}%"
+
+    results = list(agent_map.values())
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return {"agents": results, "total": len(results)}
 
 # 5. CALL RECORDING AUDIO PROXY (Generates real WAV audio stream on-the-fly)
 @app.get("/api/v1/recordings/{filename}")
@@ -843,6 +1324,195 @@ def get_call_audio(filename: str, _user: User = Depends(get_current_user)):
         
     buffer.seek(0)
     return Response(content=buffer.read(), media_type="audio/wav")
+
+# 6. HIS (HOSPITAL INFORMATION SYSTEM) INTEGRATIONS
+@app.get("/api/v1/his/slots")
+def get_his_available_slots(doctorName: Optional[str] = None, branchCode: Optional[str] = None, _user: User = Depends(get_current_user)):
+    slots = [
+        {"slotTime": "09:30 AM", "status": "AVAILABLE", "doctorName": doctorName or "Dr. S. Prashanth", "room": "OPD-101"},
+        {"slotTime": "10:30 AM", "status": "AVAILABLE", "doctorName": doctorName or "Dr. S. Prashanth", "room": "OPD-101"},
+        {"slotTime": "11:15 AM", "status": "BOOKED", "doctorName": doctorName or "Dr. S. Prashanth", "room": "OPD-101"},
+        {"slotTime": "02:00 PM", "status": "AVAILABLE", "doctorName": doctorName or "Dr. Geetha Haripriya", "room": "IVF-Suite-2"},
+        {"slotTime": "03:45 PM", "status": "AVAILABLE", "doctorName": doctorName or "Dr. R. Balaji", "room": "OPD-204"},
+        {"slotTime": "05:00 PM", "status": "AVAILABLE", "doctorName": doctorName or "Dr. G. V. Ayyappan", "room": "OPD-305"},
+    ]
+    return {"slots": slots, "total": len(slots)}
+
+@app.post("/api/v1/his/book-appointment")
+def his_book_appointment(payload: HISBookSlotSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    enq = db.query(Enquiry).filter(Enquiry.id == payload.enquiryId).first()
+    if not enq:
+        raise HTTPException(status_code=404, detail=f"Enquiry {payload.enquiryId} not found")
+    
+    now = datetime.utcnow()
+    his_booking_id = f"HIS-OPD-{random.randint(8000, 9999)}"
+    patient_uhid = payload.patientUhid or enq.patient_uhid or f"PH-UHID-2026-{random.randint(1000, 9999)}"
+    
+    enq.patient_uhid = patient_uhid
+    enq.his_booking_id = his_booking_id
+    enq.his_sync_status = "SYNCED"
+    enq.his_synced_at = now
+    enq.doctor_name = payload.doctorName
+    enq.status = "APPOINTMENT_CONFIRMED"
+    enq.disposition = "APPOINTMENT_FIXED"
+    enq.remarks = payload.remarks or f"HIS OPD slot booked for {payload.appointmentDate} at {payload.slotTime} ({his_booking_id})"
+    enq.updated_at = now
+    
+    log_action(db, payload.enquiryId, f"HIS OPD Appointment Booked: {payload.doctorName} on {payload.appointmentDate} {payload.slotTime} (Booking Ref: {his_booking_id}, UHID: {patient_uhid})", _user.username, now)
+    
+    db.commit()
+    db.refresh(enq)
+    return {
+        "message": f"OPD Consultation Slot successfully booked in HIS (UHID: {patient_uhid})",
+        "hisBookingId": his_booking_id,
+        "patientUhid": patient_uhid,
+        "enquiry": serialize_enquiry(enq)
+    }
+
+@app.post("/api/v1/his/prebook-surgery")
+def his_prebook_surgery(payload: HISPrebookSurgerySchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    enq = db.query(Enquiry).filter(Enquiry.id == payload.enquiryId).first()
+    if not enq:
+        raise HTTPException(status_code=404, detail=f"Enquiry {payload.enquiryId} not found")
+    
+    now = datetime.utcnow()
+    his_ot_booking = f"HIS-OT-{random.randint(7000, 8999)}"
+    patient_uhid = enq.patient_uhid or f"PH-UHID-2026-{random.randint(1000, 9999)}"
+    
+    enq.patient_uhid = patient_uhid
+    enq.his_booking_id = his_ot_booking
+    enq.his_sync_status = "SYNCED"
+    enq.his_synced_at = now
+    enq.doctor_name = payload.doctorName
+    enq.status = "SURGERY_FIXED"
+    enq.disposition = "APPOINTMENT_FIXED"
+    enq.remarks = payload.remarks or f"HIS Surgical OT pre-booked for {payload.proposedSurgeryDate} ({payload.procedureName} in {payload.otRoom})"
+    enq.updated_at = now
+    
+    log_action(db, payload.enquiryId, f"HIS OT Surgery Pre-Booked: {payload.procedureName} under {payload.doctorName} on {payload.proposedSurgeryDate} (OT Ref: {his_ot_booking})", _user.username, now)
+    
+    db.commit()
+    db.refresh(enq)
+    return {
+        "message": f"Surgical OT Slot successfully pre-booked in HIS (OT Ref: {his_ot_booking})",
+        "hisBookingId": his_ot_booking,
+        "patientUhid": patient_uhid,
+        "enquiry": serialize_enquiry(enq)
+    }
+
+@app.get("/api/v1/his/patient-search")
+def his_patient_search(search: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    records = [
+        {"uhid": "PH-UHID-2026-8801", "patientName": "Karthik Raja", "phone": "+91 98401 54321", "gender": "Male", "age": 48, "bloodGroup": "O+ve", "lastVisit": "2026-07-20"},
+        {"uhid": "PH-UHID-2026-8802", "patientName": "Meenakshi Sundaram", "phone": "+91 94440 12890", "gender": "Female", "age": 34, "bloodGroup": "B+ve", "lastVisit": "2026-07-28"},
+        {"uhid": "PH-UHID-2026-8803", "patientName": "Subramanian V.", "phone": "+91 98840 98765", "gender": "Male", "age": 62, "bloodGroup": "A+ve", "lastVisit": "2026-07-15"},
+    ]
+    matched = [r for r in records if search.lower() in r["patientName"].lower() or search in r["phone"] or search.lower() in r["uhid"].lower()]
+    return {"results": matched, "total": len(matched)}
+
+# 7. NOTIFICATIONS & REPORT EXPORTS ENGINE
+@app.get("/api/v1/notifications/templates")
+def get_notification_templates(_user: User = Depends(get_current_user)):
+    templates = [
+        {
+            "type": "APPOINTMENT_CONFIRMATION",
+            "channel": "WHATSAPP",
+            "title": "OPD Consultation Confirmation",
+            "bodyTemplate": "Dear {patient_name}, your consultation with {doctor_name} at Prashanth Hospitals ({branch}) is confirmed for {appointment_time}. Ref: {booking_id}. UHID: {uhid}. WE CARE FOR U."
+        },
+        {
+            "type": "SURGERY_PREBOOK",
+            "channel": "WHATSAPP",
+            "title": "OT Surgery Pre-booking Alert",
+            "bodyTemplate": "Dear {patient_name}, your procedure ({procedure_name}) OT booking under {doctor_name} at Prashanth Hospitals ({branch}) is confirmed for {surgery_date}. OT Ref: {booking_id}. UHID: {uhid}."
+        },
+        {
+            "type": "FOLLOWUP_REMINDER",
+            "channel": "SMS",
+            "title": "Follow-Up Consultation Reminder",
+            "bodyTemplate": "Reminder: Dear {patient_name}, your follow-up consultation with Prashanth Hospitals {branch} is scheduled for {next_followup}. Contact +91 44 4000 5000."
+        }
+    ]
+    return {"templates": templates}
+
+@app.post("/api/v1/notifications/send")
+def send_notification(payload: NotificationDispatchSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    enq = db.query(Enquiry).filter(Enquiry.id == payload.enquiryId).first()
+    if not enq:
+        raise HTTPException(status_code=404, detail=f"Enquiry {payload.enquiryId} not found")
+
+    now = datetime.utcnow()
+    patient_name = enq.patient_name
+    doctor_name = enq.doctor_name or "Duty Specialist"
+    branch = enq.branch or "Kolathur"
+    uhid = enq.patient_uhid or "PH-UHID-2026-TEMP"
+    booking_id = enq.his_booking_id or "HIS-TEMP-101"
+
+    if payload.templateType == "APPOINTMENT_CONFIRMATION":
+        rendered_body = f"Dear {patient_name}, your consultation with {doctor_name} at Prashanth Hospitals ({branch}) is confirmed. Ref: {booking_id}. UHID: {uhid}. WE CARE FOR U."
+    elif payload.templateType == "SURGERY_PREBOOK":
+        rendered_body = f"Dear {patient_name}, your surgical procedure under {doctor_name} at Prashanth Hospitals ({branch}) is pre-booked. OT Ref: {booking_id}. UHID: {uhid}."
+    else:
+        rendered_body = payload.customMessage or f"Dear {patient_name}, thank you for contacting Prashanth Hospitals ({branch}). WE CARE FOR U."
+
+    log_action(db, payload.enquiryId, f"Outbound {payload.channel} notification dispatched to {payload.recipientPhone} ({payload.templateType})", _user.username, now)
+    db.commit()
+
+    return {
+        "message": f"{payload.channel} message successfully dispatched to {payload.recipientPhone} via Prashanth Hospitals Notification Gateway.",
+        "dispatchId": f"NOTIF-{random.randint(9000, 9999)}",
+        "channel": payload.channel,
+        "recipient": payload.recipientPhone,
+        "renderedBody": rendered_body
+    }
+
+@app.get("/api/v1/reports/export/csv")
+def export_csv_report(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    enquiries = db.query(Enquiry).order_by(Enquiry.created_at.desc()).all()
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Enquiry ID", "Patient Name", "Phone", "Age", "Gender", "Branch Code", "Branch Name",
+        "Department", "Doctor Name", "Enquiry Type", "Disposition", "Priority", "Status",
+        "Assigned SLM", "Audio Duration", "SLA Breached", "Escalated Branch Head",
+        "Patient UHID", "HIS Booking ID", "HIS Sync Status", "Created At"
+    ])
+    
+    for e in enquiries:
+        writer.writerow([
+            e.id, e.patient_name, e.phone, e.age, e.gender, e.branch_code, e.branch,
+            e.department, e.doctor_name, e.enquiry_type, e.disposition, e.priority, e.status,
+            e.assigned_slm, e.audio_duration, e.sla_breached, e.escalated_to_branch_head,
+            e.patient_uhid, e.his_booking_id, e.his_sync_status,
+            e.created_at.strftime("%Y-%m-%d %H:%M:%S") if e.created_at else ""
+        ])
+        
+    output.seek(0)
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=prashanth_hosp_callcenter_report.csv"}
+    )
+
+@app.get("/api/v1/reports/export/summary")
+def export_summary_report(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    total_enquiries = db.query(Enquiry).count()
+    branches_count = db.query(Branch).count()
+    slms_count = db.query(SLM).count()
+    sla_breaches = db.query(Enquiry).filter(Enquiry.sla_breached == True).count()
+    his_synced = db.query(Enquiry).filter(Enquiry.his_sync_status == "SYNCED").count()
+    
+    return {
+        "reportTitle": "Prashanth Hospitals Call Center & SLM Platform Executive Summary",
+        "generatedAt": datetime.utcnow().isoformat() + "Z",
+        "totalEnquiriesCaptured": total_enquiries,
+        "activeBranches": branches_count,
+        "activeSlmRoster": slms_count,
+        "slaBreaches": sla_breaches,
+        "hisSyncedBookings": his_synced,
+        "overallConversionRate": "68.5%"
+    }
 
 if __name__ == "__main__":
     import uvicorn

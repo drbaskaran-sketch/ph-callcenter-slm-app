@@ -57,8 +57,8 @@ export default function SLMMobileSimulator() {
     return now.toTimeString().split(' ')[0];
   };
 
-  // Register action with timestamp
-  const registerNewAction = (actionText, performedByText = 'SLM Agent') => {
+  // Register action with timestamp & persist to PostgreSQL
+  const registerNewAction = async (actionText, performedByText = 'SLM Agent') => {
     const timeStr = getCurrentFormattedTime();
     const newAction = {
       timestamp: timeStr,
@@ -73,10 +73,28 @@ export default function SLMMobileSimulator() {
         ...prev,
         registeredActions: [...currentActions, newAction]
       };
-      // also update in enquiries list
       setEnquiries(list => list.map(item => item.id === prev.id ? updated : item));
       return updated;
     });
+
+    if (selectedEnquiry?.id) {
+      try {
+        const res = await apiFetch(`${API_BASE}/enquiries/${selectedEnquiry.id}/actions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: actionText, performedBy: performedByText })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.enquiry) {
+            setSelectedEnquiry(data.enquiry);
+            setEnquiries(list => list.map(item => item.id === data.enquiry.id ? data.enquiry : item));
+          }
+        }
+      } catch (e) {
+        console.log('Action registered in local state');
+      }
+    }
   };
 
   // Handle Update Disposition Status with Mandatory Remarks Validation
@@ -91,10 +109,10 @@ export default function SLMMobileSimulator() {
     setErrorMessage(null);
 
     // Register timestamped action
-    registerNewAction(`Status updated to ${newStatus.replace('_', ' ')} with remarks: "${remarks || 'None'}"`, selectedEnquiry.assignedSLM || 'SLM Agent');
+    registerNewAction(`Status updated to ${newStatus.replace('_', ' ')} with remarks: "${remarks || 'None'}"`, selectedEnquiry?.assignedSLM || 'SLM Agent');
 
     try {
-      await apiFetch(`${API_BASE}/enquiries/${selectedEnquiry.id}`, {
+      const res = await apiFetch(`${API_BASE}/enquiries/${selectedEnquiry.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -103,6 +121,13 @@ export default function SLMMobileSimulator() {
           remarks: remarks
         })
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.enquiry) {
+          setSelectedEnquiry(data.enquiry);
+          setEnquiries(list => list.map(item => item.id === data.enquiry.id ? data.enquiry : item));
+        }
+      }
     } catch (e) {
       console.log('Status updated in local state');
     }
@@ -123,23 +148,90 @@ export default function SLMMobileSimulator() {
     alert(`Opening WhatsApp chat with ${selectedEnquiry?.phone}...\nAction registered at ${getCurrentFormattedTime()}`);
   };
 
-  // Handle Audio Playback
+  // Handle HIS OPD Slot Booking
+  const handleBookHisSlot = async () => {
+    if (!selectedEnquiry) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/his/book-appointment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enquiryId: selectedEnquiry.id,
+          doctorName: selectedEnquiry.doctorName || "Dr. S. Prashanth",
+          appointmentDate: new Date().toISOString().split('T')[0],
+          slotTime: "10:30 AM",
+          remarks: remarks || "OPD Consultation slot booked via HIS API"
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.enquiry) {
+          setSelectedEnquiry(data.enquiry);
+          setEnquiries(list => list.map(item => item.id === data.enquiry.id ? data.enquiry : item));
+        }
+        setToastMessage(`✅ HIS OPD Slot Booked! (Ref: ${data.hisBookingId}, UHID: ${data.patientUhid})`);
+        setShowToast(true);
+        setTimeout(() => setShowToast(false), 4000);
+      }
+    } catch (e) {
+      console.log('Error booking HIS slot');
+    }
+  };
+
+  // Handle HIS Surgery Pre-booking
+  const handlePrebookHisSurgery = async () => {
+    if (!selectedEnquiry) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/his/prebook-surgery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enquiryId: selectedEnquiry.id,
+          doctorName: selectedEnquiry.doctorName || "Dr. S. Prashanth",
+          procedureName: selectedEnquiry.enquiryType || "Surgical Procedure",
+          proposedSurgeryDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
+          remarks: remarks || "OT Surgery pre-booked via HIS API"
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.enquiry) {
+          setSelectedEnquiry(data.enquiry);
+          setEnquiries(list => list.map(item => item.id === data.enquiry.id ? data.enquiry : item));
+        }
+        setToastMessage(`🏥 HIS OT Surgery Pre-Booked! (Ref: ${data.hisBookingId}, UHID: ${data.patientUhid})`);
+        setShowToast(true);
+        setTimeout(() => setShowToast(false), 4000);
+      }
+    } catch (e) {
+      console.log('Error prebooking HIS surgery');
+    }
+  };
+
+  // Handle Audio Playback with live stream proxy
   const toggleAudioPlayback = () => {
     if (!isPlaying) {
       registerNewAction(`Call recording stream played by SLM`, selectedEnquiry?.assignedSLM || 'SLM Agent');
+      const audioFileName = selectedEnquiry?.recordingUrl || selectedEnquiry?.recording_path || 'wav_8801.wav';
+      const audioUrl = `${API_BASE}/audio/${audioFileName}`;
+      
       try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(440, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 3);
+        const audioObj = new Audio(audioUrl);
+        audioObj.play().catch(() => {
+          // Fallback Web Audio API synth if browser blocks autoplay or format unsupported
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 3);
+        });
       } catch (e) {
-        console.log('Audio synth playback started');
+        console.log('Audio stream playback initiated');
       }
       setIsPlaying(true);
       setTimeout(() => setIsPlaying(false), 3000);
@@ -405,6 +497,40 @@ export default function SLMMobileSimulator() {
                     <h3 className="text-sm font-black text-slate-900">{selectedEnquiry.patientName}</h3>
                     <p className="text-xs text-slate-600 font-medium mt-0.5">{selectedEnquiry.phone} • {selectedEnquiry.gender}, {selectedEnquiry.age}y</p>
                     <p className="text-xs font-bold text-teal-800 mt-1">{selectedEnquiry.enquiryType}</p>
+                  </div>
+
+                  {/* HIS Integration & Booking Card */}
+                  <div className="bg-teal-900 text-white p-3 rounded-2xl border border-teal-800 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold uppercase text-teal-300">HIS EMR & Slot Booking</span>
+                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
+                        selectedEnquiry.hisSyncStatus === 'SYNCED' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-slate-900'
+                      }`}>
+                        {selectedEnquiry.hisSyncStatus || 'PENDING'}
+                      </span>
+                    </div>
+
+                    <div className="text-[10px] font-medium space-y-0.5">
+                      <p><span className="text-slate-400 font-bold">UHID:</span> <span className="font-extrabold text-teal-200">{selectedEnquiry.patientUhid || 'Auto-Provision on Booking'}</span></p>
+                      {selectedEnquiry.hisBookingId && (
+                        <p><span className="text-slate-400 font-bold">HIS Ref:</span> <span className="font-extrabold text-emerald-300">{selectedEnquiry.hisBookingId}</span></p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1.5 pt-1">
+                      <button
+                        onClick={handleBookHisSlot}
+                        className="bg-teal-700 hover:bg-teal-600 text-white font-extrabold py-1.5 px-2 rounded-lg text-[10px] border border-teal-500 transition-all text-center"
+                      >
+                        Book HIS OPD Slot
+                      </button>
+                      <button
+                        onClick={handlePrebookHisSurgery}
+                        className="bg-emerald-700 hover:bg-emerald-600 text-white font-extrabold py-1.5 px-2 rounded-lg text-[10px] border border-emerald-500 transition-all text-center"
+                      >
+                        Pre-Book Surgery OT
+                      </button>
+                    </div>
                   </div>
 
                   {/* Call Timing & Duration Card */}

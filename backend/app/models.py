@@ -41,19 +41,18 @@ class SLM(Base):
 
 
 class User(Base):
-    """Login account for the leadership dashboard / SLM console.
-
-    MVP-scope auth: a single shared role model (ADMIN) is enough to close
-    off the previously-open API (any endpoint was reachable by anyone on
-    the network with no credentials at all). Per-SLM individual accounts
-    with scoped permissions would be a reasonable follow-up, not required
-    to stop the immediate data-exposure problem."""
+    """Login account for leadership dashboard, supervisors, and SLMs."""
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String, unique=True, index=True, nullable=False)
+    full_name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
     password_hash = Column(String, nullable=False)
-    role = Column(String, default="ADMIN")
+    role = Column(String, default="ADMIN")  # ADMIN, SUPERVISOR, SLM, BRANCH_HEAD
+    branch_code = Column(String, default="ALL", index=True)
+    slm_id = Column(String, nullable=True, index=True)
+    status = Column(String, default="ACTIVE")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -93,6 +92,12 @@ class Enquiry(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     sla_breached = Column(Boolean, default=False)
     escalated_to_branch_head = Column(Boolean, default=False)
+
+    # HIS (Hospital Information System) integration fields
+    patient_uhid = Column(String, nullable=True, index=True)
+    his_booking_id = Column(String, nullable=True, index=True)
+    his_sync_status = Column(String, default="PENDING", index=True)  # PENDING, SYNCED, FAILED
+    his_synced_at = Column(DateTime, nullable=True)
 
     actions = relationship(
         "EnquiryAction",
