@@ -47,6 +47,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+psycopg2://ph_db_user:ph_secure_pass@localhost:5432/ph_callcenter_slm_db
           PGPASSWORD: ph_secure_pass
+          ADMIN_PASSWORD: hxyE7C!roFnMGIsaH1xT
         run: |
           # Export password for pg tools and psql
           export PGPASSWORD=ph_secure_pass
