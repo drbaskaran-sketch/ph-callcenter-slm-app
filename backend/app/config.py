@@ -33,7 +33,7 @@ class Settings:
     # JWT Auth — default admin account is seeded on first boot only (see
     # main.init_db). Override these in .env for any real deployment.
     ADMIN_USERNAME: str = os.getenv("ADMIN_USERNAME", "admin")
-    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "ChangeMe123!")
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "hxyE7C!roFnMGIsaH1xT")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
     
     # Database Configuration & Pool Parameters

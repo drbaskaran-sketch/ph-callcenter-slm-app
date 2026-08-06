@@ -602,6 +602,10 @@ def init_db():
 
 # --- API ENDPOINTS ---
 
+@app.get("/health", include_in_schema=False)
+async def health():
+    return {"status": "ok"}
+
 @app.get("/")
 def read_root(db: Session = Depends(get_db_session)):
     return {
