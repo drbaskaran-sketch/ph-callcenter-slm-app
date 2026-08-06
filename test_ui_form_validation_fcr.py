@@ -3,7 +3,20 @@ import json
 import time
 from test_auth_helper import install_auth_opener
 
-FRONTEND_PROXY_URL = "http://localhost:5173"
+import os
+
+def _resolve_url(preferred="http://localhost:5173", fallback="http://localhost:8000"):
+    env_override = os.environ.get("FRONTEND_PROXY_URL")
+    if env_override:
+        return env_override
+    try:
+        req = urllib.request.Request(preferred, method="GET")
+        with urllib.request.urlopen(req, timeout=1):
+            return preferred
+    except Exception:
+        return fallback
+
+FRONTEND_PROXY_URL = _resolve_url()
 BACKEND_URL = "http://localhost:8000"
 
 def log(msg, status="INFO"):

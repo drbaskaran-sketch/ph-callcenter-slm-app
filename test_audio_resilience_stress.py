@@ -5,7 +5,20 @@ import time
 import json
 from test_auth_helper import install_auth_opener
 
-FRONTEND_PROXY_URL = "http://localhost:5173"
+import os
+
+def _resolve_url(preferred="http://localhost:5173", fallback="http://localhost:8000"):
+    env_override = os.environ.get("FRONTEND_PROXY_URL")
+    if env_override:
+        return env_override
+    try:
+        req = urllib.request.Request(preferred, method="GET")
+        with urllib.request.urlopen(req, timeout=1):
+            return preferred
+    except Exception:
+        return fallback
+
+FRONTEND_PROXY_URL = _resolve_url()
 BACKEND_URL = "http://localhost:8000"
 _AUTH_TOKEN = None  # set in main() via install_auth_opener(); used by the raw-socket test below
 
@@ -44,13 +57,18 @@ def fetch_audio_stream(stream_idx):
 def simulate_abrupt_client_disconnect():
     """Simulates raw socket connection drop mid-stream to verify server error resilience"""
     try:
+        import urllib.parse
+        parsed = urllib.parse.urlparse(FRONTEND_PROXY_URL)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(("localhost", 5173))
+        s.connect((host, port))
         
         # Send HTTP GET request (with the bearer token — this endpoint is
         # now auth-protected like everything else)
         auth_header = f"Authorization: Bearer {_AUTH_TOKEN}\r\n" if _AUTH_TOKEN else ""
-        http_req = f"GET /api/v1/recordings/wav_8801.wav HTTP/1.1\r\nHost: localhost:5173\r\n{auth_header}Connection: keep-alive\r\n\r\n"
+        http_req = f"GET /api/v1/recordings/wav_8801.wav HTTP/1.1\r\nHost: {host}:{port}\r\n{auth_header}Connection: keep-alive\r\n\r\n"
         s.sendall(http_req.encode("utf-8"))
         
         # Read only first 128 bytes then forcefully reset / close socket
