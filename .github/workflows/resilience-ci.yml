@@ -26,7 +26,7 @@ jobs:
       - name: 📦 Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install fastapi uvicorn pydantic sqlalchemy greenlet
+          pip install -r backend/requirements.txt
 
       - name: 🚀 Start FastAPI Backend Server in Background
         run: |
@@ -59,6 +59,12 @@ jobs:
           python test_frontend_dockerfile.py
           python test_docker_compose.py
           python test_nginx_ssl_config.py
+          python test_user_management_stage3.py
+          python test_analytics_drilldown_stage4.py
+          python test_sla_governance_stage5.py
+          python test_his_integrations_stage6.py
+          python test_notifications_reports_stage7.py
+          python test_qa_security_hardening_stage8.py
 
       - name: ✨ Report Pipeline Success
         run: |
