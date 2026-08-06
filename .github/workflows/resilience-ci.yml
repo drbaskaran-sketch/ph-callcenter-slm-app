@@ -13,6 +13,21 @@ jobs:
     name: Execute Automated Resilience & Endpoint Exception Audit
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ph_db_user
+          POSTGRES_PASSWORD: ph_secure_pass
+          POSTGRES_DB: ph_callcenter_slm_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ph_db_user -d ph_callcenter_slm_db"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
+
     steps:
       - name: 📥 Check out repository code
         uses: actions/checkout@v4
@@ -29,10 +44,27 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: 🚀 Start FastAPI Backend Server in Background
+        env:
+          DATABASE_URL: postgresql+psycopg2://ph_db_user:ph_secure_pass@localhost:5432/ph_callcenter_slm_db
+          PGPASSWORD: ph_secure_pass
         run: |
+          echo "Waiting for Postgres..."
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U ph_db_user >/dev/null 2>&1; then
+              echo "✅ Postgres is ready"
+              break
+            fi
+            echo "Waiting for postgres... ($i/30)"
+            sleep 1
+          done
+          if ! pg_isready -h localhost -p 5432 -U ph_db_user >/dev/null 2>&1; then
+            echo "❌ Postgres did not become ready in time"
+            exit 1
+          fi
+
           python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 &
           echo "Waiting for FastAPI server to initialize on http://localhost:8000..."
-          for i in {1..15}; do
+          for i in {1..30}; do
             if curl -s http://localhost:8000/ > /dev/null; then
               echo "✅ FastAPI Backend Server initialized and healthy!"
               exit 0

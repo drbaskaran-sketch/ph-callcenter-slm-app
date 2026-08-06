@@ -1051,6 +1051,19 @@ def add_enquiry_action(
     db.refresh(enq)
     return {"message": "Action logged successfully", "enquiry": serialize_enquiry(enq)}
 
+@app.post("/api/v1/enquiries/{enquiry_id}/simulate-escalation")
+def simulate_enquiry_escalation(enquiry_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+    enq = db.query(Enquiry).filter(Enquiry.id == enquiry_id).first()
+    if not enq:
+        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+    enq.sla_breached = True
+    enq.escalated_to_branch_head = True
+    enq.updated_at = datetime.utcnow()
+    log_action(db, enquiry_id, "FIRST RESPONSE SLA BREACH (>15 mins) — Escalated to Branch Head & Operations Director", "SLA Engine", enq.updated_at)
+    db.commit()
+    db.refresh(enq)
+    return {"message": f"Simulated SLA breach & escalation for Enquiry {enquiry_id}", "enquiry": serialize_enquiry(enq)}
+
 @app.post("/api/v1/sla/check-breaches")
 def check_sla_breaches(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
     now = datetime.utcnow()
