@@ -1,21 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { Phone, MessageSquare, UserCheck, Play, Pause, Clock, Search, Filter, RefreshCw, CheckCircle, ListOrdered, Calendar } from 'lucide-react';
-import { MOCK_ENQUIRIES } from '../data/mockData';
 import { apiFetch, API_BASE } from '../api';
 
 export default function SLMMobileSimulator() {
-  const [enquiries, setEnquiries] = useState(MOCK_ENQUIRIES);
-  const [selectedEnquiry, setSelectedEnquiry] = useState(MOCK_ENQUIRIES[0]);
+  const [enquiries, setEnquiries] = useState([]);
+  const [selectedEnquiry, setSelectedEnquiry] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [status, setStatus] = useState(MOCK_ENQUIRIES[0].status);
-  const [notes, setNotes] = useState(MOCK_ENQUIRIES[0].notes || '');
-  const [remarks, setRemarks] = useState(MOCK_ENQUIRIES[0].remarks || '');
+  const [status, setStatus] = useState('');
+  const [notes, setNotes] = useState('');
+  const [remarks, setRemarks] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState(null);
   const [filterBranch, setFilterBranch] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [loadingSim, setLoadingSim] = useState(false);
 
   // Fetch live enquiries from FastAPI backend
   const fetchEnquiries = async () => {
@@ -23,18 +21,19 @@ export default function SLMMobileSimulator() {
       const res = await apiFetch(`${API_BASE}/enquiries`);
       if (res.ok) {
         const data = await res.json();
-        if (data.enquiries && data.enquiries.length > 0) {
-          setEnquiries(data.enquiries);
-          if (!selectedEnquiry || !data.enquiries.find(e => e.id === selectedEnquiry.id)) {
-            setSelectedEnquiry(data.enquiries[0]);
-            setStatus(data.enquiries[0].status);
-            setNotes(data.enquiries[0].notes || '');
-            setRemarks(data.enquiries[0].remarks || '');
-          }
+        setEnquiries(data.enquiries || []);
+        if (data.enquiries && data.enquiries.length > 0 &&
+            (!selectedEnquiry || !data.enquiries.find(e => e.id === selectedEnquiry.id))) {
+          setSelectedEnquiry(data.enquiries[0]);
+          setStatus(data.enquiries[0].status);
+          setNotes(data.enquiries[0].notes || '');
+          setRemarks(data.enquiries[0].remarks || '');
         }
+      } else {
+        setErrorMessage('⚠️ Unable to load live enquiries from the server.');
       }
     } catch (err) {
-      console.log('Using local mock enquiries fallback');
+      setErrorMessage('⚠️ Unable to reach the backend API.');
     }
   };
 
@@ -244,45 +243,6 @@ export default function SLMMobileSimulator() {
     }
   };
 
-  // Simulate incoming call ingestion
-  const handleSimulateCall = async () => {
-    setLoadingSim(true);
-    try {
-      const res = await apiFetch(`${API_BASE}/xtend/simulate-call`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedBranchCode: filterBranch !== 'ALL' ? filterBranch : undefined
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const newEnq = {
-          ...data.enquiry,
-          callStartTime: getCurrentFormattedTime(),
-          callEndTime: 'In Progress',
-          callDuration: '01m 20s',
-          registeredActions: [
-            { timestamp: getCurrentFormattedTime(), action: 'Inbound Call Connected at Kolathur Hub', performedBy: 'XTEND IVR' },
-            { timestamp: getCurrentFormattedTime(), action: 'Lead Dispatched to SLM', performedBy: 'FCM Push' }
-          ]
-        };
-        setEnquiries(prev => [newEnq, ...prev]);
-        setSelectedEnquiry(newEnq);
-        setStatus(newEnq.status);
-        setNotes(newEnq.notes);
-        setRemarks(newEnq.remarks || '');
-        setToastMessage(`🚨 NEW CALL INGESTED: ${newEnq.patientName} (${newEnq.department})`);
-        setShowToast(true);
-        setTimeout(() => setShowToast(false), 4000);
-      }
-    } catch (err) {
-      console.log('Simulation fallback error', err);
-    } finally {
-      setLoadingSim(false);
-    }
-  };
-
   const filteredEnquiries = enquiries.filter(enq => {
     const matchesBranch = filterBranch === 'ALL' || enq.branchCode === filterBranch;
     const matchesSearch = !searchQuery || 
@@ -310,12 +270,11 @@ export default function SLMMobileSimulator() {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={handleSimulateCall}
-            disabled={loadingSim}
-            className="flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 px-4 rounded-xl shadow-xs transition-all text-xs disabled:opacity-50"
+            onClick={fetchEnquiries}
+            className="flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 px-4 rounded-xl shadow-xs transition-all text-xs"
           >
-            <RefreshCw className={`w-4 h-4 ${loadingSim ? 'animate-spin' : ''}`} />
-            <span>{loadingSim ? 'Ingesting Call...' : 'Simulate Inbound XTEND Call'}</span>
+            <RefreshCw className="w-4 h-4" />
+            <span>Refresh Queue</span>
           </button>
         </div>
       </div>
