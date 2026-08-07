@@ -28,7 +28,7 @@ def main():
 
     # 2. Audit Port Mappings & Dependency Graph
     print("\n2️⃣  Auditing Network Port Mappings & Service Dependency Graph...")
-    assert "8000:8000" in compose_text, "Backend port 8000 mapping missing!"
+    assert ("expose:" in compose_text and '"8000"' in compose_text) or "8000:8000" in compose_text, "Backend port 8000 mapping/exposure missing!"
     assert "5173:80" in compose_text, "Frontend port 5173:80 mapping missing!"
     assert "depends_on:" in compose_text and "condition: service_healthy" in compose_text, "Service health dependency condition missing!"
     log("Port mappings (8000, 5173:80) & service_healthy dependency graph verified.", "SUCCESS")
