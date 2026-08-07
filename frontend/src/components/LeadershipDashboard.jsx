@@ -1,27 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { PRASHANTH_BRANCHES, MOCK_ENQUIRIES } from '../data/mockData';
 import { Activity, Clock, Building2, UserCheck, AlertTriangle, RefreshCw, Award, PhoneCall, Stethoscope, Users, PieChart, ChevronRight } from 'lucide-react';
 import { apiFetch, API_BASE } from '../api';
 
+const EMPTY_METRICS = {
+  totalInquiriesToday: null,
+  avgFirstResponseTatMins: null,
+  surgeriesAndSlotsFixed: null,
+  conversionRate: null,
+  slaBreachAlerts: null,
+  branchesCount: null,
+  activeSlmsCount: null
+};
+
 export default function LeadershipDashboard() {
   const [activeSubTab, setActiveSubTab] = useState('overview'); // 'overview' | 'specialities' | 'doctors' | 'agents'
-  
-  const [metrics, setMetrics] = useState({
-    totalInquiriesToday: 401,
-    avgFirstResponseTatMins: 9.2,
-    surgeriesAndSlotsFixed: 128,
-    conversionRate: '68%',
-    slaBreachAlerts: 2,
-    branchesCount: 7,
-    activeSlmsCount: 5
-  });
+
+  // Metrics start as nulls (rendered as "—") rather than plausible-looking
+  // fake numbers — a failed fetch must read as "not loaded", not as data.
+  const [metrics, setMetrics] = useState(EMPTY_METRICS);
 
   const [specialities, setSpecialities] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [agents, setAgents] = useState([]);
-  const [branches, setBranches] = useState(PRASHANTH_BRANCHES);
-  const [enquiries, setEnquiries] = useState(MOCK_ENQUIRIES);
+  const [branches, setBranches] = useState([]);
+  const [enquiries, setEnquiries] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -56,8 +60,9 @@ export default function LeadershipDashboard() {
         const d = await resEnq.json();
         if (d.enquiries) setEnquiries(d.enquiries);
       }
+      setLoadError(null);
     } catch (e) {
-      console.log('Using local dashboard state fallback');
+      setLoadError('⚠️ Unable to reach the backend API — showing the last successfully loaded data, if any.');
     } finally {
       setLoading(false);
     }
@@ -99,18 +104,22 @@ export default function LeadershipDashboard() {
         </div>
       </div>
 
+      {loadError && (
+        <div className="bg-red-50 border border-red-200 text-red-800 text-xs p-3 rounded-xl font-bold flex items-center gap-2 shadow-xs">
+          <AlertTriangle className="w-4 h-4 text-red-600" />
+          <span>{loadError}</span>
+        </div>
+      )}
+
       {/* Metric Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        
+
         <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-bold">Total Inquiries Today</span>
             <Building2 className="w-4 h-4 text-teal-700" />
           </div>
-          <p className="text-2xl font-black text-slate-900">{metrics.totalInquiriesToday}</p>
-          <span className="text-[11px] text-emerald-700 font-bold mt-1 block">
-            +14% vs yesterday
-          </span>
+          <p className="text-2xl font-black text-slate-900">{metrics.totalInquiriesToday ?? '—'}</p>
         </div>
 
         <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm">
@@ -118,9 +127,9 @@ export default function LeadershipDashboard() {
             <span className="text-xs font-bold">Avg First Response TAT</span>
             <Clock className="w-4 h-4 text-teal-700" />
           </div>
-          <p className="text-2xl font-black text-teal-700">{metrics.avgFirstResponseTatMins} Mins</p>
+          <p className="text-2xl font-black text-teal-700">{metrics.avgFirstResponseTatMins ?? '—'} Mins</p>
           <span className="text-[11px] text-teal-800 font-bold mt-1 block">
-            Target: &lt; 15 Mins (SLA Met)
+            Target: &lt; 15 Mins
           </span>
         </div>
 
@@ -129,9 +138,9 @@ export default function LeadershipDashboard() {
             <span className="text-xs font-bold">Surgeries & Slots Fixed</span>
             <UserCheck className="w-4 h-4 text-emerald-600" />
           </div>
-          <p className="text-2xl font-black text-emerald-700">{metrics.surgeriesAndSlotsFixed}</p>
+          <p className="text-2xl font-black text-emerald-700">{metrics.surgeriesAndSlotsFixed ?? '—'}</p>
           <span className="text-[11px] text-emerald-800 font-bold mt-1 block">
-            {metrics.conversionRate} Conversion Rate
+            {metrics.conversionRate ?? '—'} Conversion Rate
           </span>
         </div>
 
@@ -140,7 +149,7 @@ export default function LeadershipDashboard() {
             <span className="text-xs font-bold">SLA Breach Alerts</span>
             <AlertTriangle className="w-4 h-4 text-amber-600" />
           </div>
-          <p className="text-2xl font-black text-amber-700">{metrics.slaBreachAlerts}</p>
+          <p className="text-2xl font-black text-amber-700">{metrics.slaBreachAlerts ?? '—'}</p>
           <span className="text-[11px] text-amber-800 font-bold mt-1 block">
             Auto-Escalated to Branch Head
           </span>

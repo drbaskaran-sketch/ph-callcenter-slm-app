@@ -64,9 +64,13 @@ class Settings:
         for origin in os.getenv("CORS_ORIGINS", "*").split(",")
     ]
 
+    @property
+    def IS_PRODUCTION(self) -> bool:
+        return self.APP_ENV.lower() == "production"
+
     def validate(self) -> None:
         """Refuse an insecure production boot instead of accepting demo defaults."""
-        if self.APP_ENV.lower() != "production":
+        if not self.IS_PRODUCTION:
             return
         unsafe = []
         if len(self.SECRET_KEY) < 32 or "change" in self.SECRET_KEY.lower() or "replace" in self.SECRET_KEY.lower():

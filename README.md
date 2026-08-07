@@ -57,8 +57,7 @@ ph-callcenter-slm-app/
 │   └── requirements.txt      # Python dependencies
 ├── frontend/                 # React + Vite Interactive Web & SLM Mobile Simulator
 │   ├── src/
-│   │   ├── components/       # Dashboard & Mobile Simulator components
-│   │   └── data/             # Prashanth Hospitals mock data
+│   │   └── components/       # Dashboard & Mobile Simulator components
 │   ├── package.json
 │   └── vite.config.js
 └── docs/                     # Architecture & Governance Documentation

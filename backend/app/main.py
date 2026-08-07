@@ -434,6 +434,29 @@ def time_ago(dt: datetime) -> str:
     return f"{days} day{'s' if days != 1 else ''} ago"
 
 
+def compute_avg_duration_mins(enquiries: List["Enquiry"]) -> Optional[float]:
+    """Average call duration in minutes from call_start_time/call_end_time
+    HH:MM:SS strings, skipping rows missing either value or still in
+    progress. Returns None (render 'N/A') rather than a fabricated number
+    when there's no usable sample yet."""
+    durations = []
+    for e in enquiries:
+        if not e.call_start_time or not e.call_end_time or e.call_end_time == "In Progress":
+            continue
+        try:
+            start = datetime.strptime(e.call_start_time, "%H:%M:%S")
+            end = datetime.strptime(e.call_end_time, "%H:%M:%S")
+        except ValueError:
+            continue
+        delta_mins = (end - start).total_seconds() / 60.0
+        if delta_mins < 0:
+            continue
+        durations.append(delta_mins)
+    if not durations:
+        return None
+    return round(sum(durations) / len(durations), 1)
+
+
 def serialize_enquiry(enq: "Enquiry") -> dict:
     """Maps the DB row (+ its registered actions) to the JSON shape the
     frontend already expects, so no frontend changes are required."""
@@ -581,7 +604,10 @@ def init_db():
             db.commit()
             print(f"✅ Seeded {len(SEED_SLMS)} initial SLMs into PostgreSQL.")
 
-        if settings.SEED_DEMO_DATA and db.query(Enquiry).count() == 0:
+        # Patient/call demo data must never land in a production deployment,
+        # even if SEED_DEMO_DATA was left at its default — this check doesn't
+        # depend on that env var being set correctly.
+        if settings.SEED_DEMO_DATA and not settings.IS_PRODUCTION and db.query(Enquiry).count() == 0:
             for seed in SEED_ENQUIRIES:
                 created_at = datetime.utcnow() - timedelta(minutes=seed["age_offset_mins"])
                 enq = Enquiry(
@@ -955,6 +981,11 @@ def create_enquiry(payload: EnquiryCreate, db: Session = Depends(get_db_session)
 
 @app.post("/api/v1/xtend/simulate-call")
 def simulate_xtend_call(payload: XtendCallSimulationSchema, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
+    # Fabricates a call record — this must never run against a production
+    # deployment, which should only ever see calls from the real XTEND
+    # ingestion path. Left enabled outside production for demos/dev/CI.
+    if settings.IS_PRODUCTION:
+        raise HTTPException(status_code=403, detail="Simulated call ingestion is disabled in production.")
     branch_code = payload.selectedBranchCode or random.choice(["KOL", "CHP", "VEL", "GUM", "IVF"])
     branch_row = db.query(Branch).filter(Branch.code == branch_code).first()
     matched_branch = branch_row.name if branch_row else "Kolathur (Call Center Hub)"
@@ -1087,6 +1118,10 @@ def add_enquiry_action(
 
 @app.post("/api/v1/enquiries/{enquiry_id}/simulate-escalation")
 def simulate_enquiry_escalation(enquiry_id: str, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
+    # Same rationale as simulate-call: forcing a fake SLA breach must not be
+    # reachable once this is a real production deployment.
+    if settings.IS_PRODUCTION:
+        raise HTTPException(status_code=403, detail="Simulated escalation is disabled in production.")
     enq = get_accessible_enquiry(db, _user, enquiry_id)
     enq.sla_breached = True
     enq.escalated_to_branch_head = True
@@ -1212,15 +1247,17 @@ def get_sla_scorecard(db: Session = Depends(get_db_session), _user: User = Depen
 # 4. LEADERSHIP ANALYTICS
 @app.get("/api/v1/analytics/overview")
 def get_analytics_overview(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
-    total_inquiries = 457
-    avg_tat = 9.2
-    surgeries = 127
-    conversion = "27%"
-    sla_breaches = db.query(Enquiry).filter(Enquiry.sla_breached == True).count()
+    all_enquiries = db.query(Enquiry).all()
+    total_inquiries = len(all_enquiries)
+    avg_tat = compute_avg_duration_mins(all_enquiries)
+    surgeries = len([e for e in all_enquiries if e.status == "SURGERY_FIXED"])
+    converted = len([e for e in all_enquiries if e.status in ["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED", "CLOSED"]])
+    conversion = f"{round((converted / total_inquiries) * 100, 1)}%" if total_inquiries else "0%"
+    sla_breaches = len([e for e in all_enquiries if e.sla_breached])
 
     return {
         "totalInquiriesToday": total_inquiries,
-        "avgFirstResponseTatMins": avg_tat,
+        "avgFirstResponseTatMins": avg_tat if avg_tat is not None else "N/A",
         "surgeriesAndSlotsFixed": surgeries,
         "conversionRate": conversion,
         "slaBreachAlerts": sla_breaches,
@@ -1232,41 +1269,26 @@ def get_analytics_overview(db: Session = Depends(get_db_session), _user: User = 
 def get_analytics_specialities(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     departments = ["Cardiology", "IVF & Fertility", "Orthopedics", "Obstetrics & Gynecology", "Nephrology & Urology", "Neurology", "General Surgery"]
     enquiries = db.query(Enquiry).all()
-    
-    dept_map = {}
-    for d in departments:
-        dept_map[d] = {
-            "speciality": d,
-            "totalInquiries": 0,
-            "surgeriesAndAppointmentsFixed": 0,
-            "pendingLeads": 0,
-            "conversionRate": "0%",
-            "avgTatMins": 8.5
-        }
-        
-    for e in enquiries:
-        dept = e.department or "General Surgery"
-        if dept not in dept_map:
-            dept_map[dept] = {
-                "speciality": dept,
-                "totalInquiries": 0,
-                "surgeriesAndAppointmentsFixed": 0,
-                "pendingLeads": 0,
-                "conversionRate": "0%",
-                "avgTatMins": 8.0
-            }
-        
-        dept_map[dept]["totalInquiries"] += 1
-        if e.status in ["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED", "CLOSED"]:
-            dept_map[dept]["surgeriesAndAppointmentsFixed"] += 1
-        elif e.status in ["NEW", "ASSIGNED", "CONTACTED"]:
-            dept_map[dept]["pendingLeads"] += 1
 
-    for dept, data in dept_map.items():
-        tot = data["totalInquiries"]
-        fix = data["surgeriesAndAppointmentsFixed"]
+    dept_enqs: dict = {d: [] for d in departments}
+    for e in enquiries:
+        dept_enqs.setdefault(e.department or "General Surgery", []).append(e)
+
+    dept_map = {}
+    for dept, dept_list in dept_enqs.items():
+        tot = len(dept_list)
+        fix = len([e for e in dept_list if e.status in ["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED", "CLOSED"]])
+        pending = len([e for e in dept_list if e.status in ["NEW", "ASSIGNED", "CONTACTED"]])
         rate = round((fix / tot * 100), 1) if tot > 0 else 0.0
-        data["conversionRate"] = f"{rate}%"
+        avg_tat = compute_avg_duration_mins(dept_list)
+        dept_map[dept] = {
+            "speciality": dept,
+            "totalInquiries": tot,
+            "surgeriesAndAppointmentsFixed": fix,
+            "pendingLeads": pending,
+            "conversionRate": f"{rate}%",
+            "avgTatMins": avg_tat if avg_tat is not None else "N/A"
+        }
 
     results = list(dept_map.values())
     results.sort(key=lambda x: x["totalInquiries"], reverse=True)
@@ -1276,28 +1298,25 @@ def get_analytics_specialities(db: Session = Depends(get_db_session), _user: Use
 @app.get("/api/v1/analytics/doctors")
 def get_analytics_doctors(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     enquiries = db.query(Enquiry).all()
-    
-    doc_map = {}
-    for e in enquiries:
-        doc = e.doctor_name or "Duty Consultant Doctor"
-        if doc not in doc_map:
-            doc_map[doc] = {
-                "doctorName": doc,
-                "department": e.department or "Multispecialty",
-                "consultations": 0,
-                "surgeriesFixed": 0,
-                "conversionRate": "0%",
-                "avgPatientTat": "7.8 mins"
-            }
-        doc_map[doc]["consultations"] += 1
-        if e.status in ["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED"]:
-            doc_map[doc]["surgeriesFixed"] += 1
 
-    for doc, data in doc_map.items():
-        tot = data["consultations"]
-        fix = data["surgeriesFixed"]
+    doc_enqs: dict = {}
+    for e in enquiries:
+        doc_enqs.setdefault(e.doctor_name or "Duty Consultant Doctor", []).append(e)
+
+    doc_map = {}
+    for doc, doc_list in doc_enqs.items():
+        tot = len(doc_list)
+        fix = len([e for e in doc_list if e.status in ["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED"]])
         rate = round((fix / tot * 100), 1) if tot > 0 else 0.0
-        data["conversionRate"] = f"{rate}%"
+        avg_tat = compute_avg_duration_mins(doc_list)
+        doc_map[doc] = {
+            "doctorName": doc,
+            "department": doc_list[0].department or "Multispecialty",
+            "consultations": tot,
+            "surgeriesFixed": fix,
+            "conversionRate": f"{rate}%",
+            "avgPatientTat": f"{avg_tat} mins" if avg_tat is not None else "N/A"
+        }
 
     results = list(doc_map.values())
     results.sort(key=lambda x: x["consultations"], reverse=True)
@@ -1344,9 +1363,15 @@ def get_analytics_agents(db: Session = Depends(get_db_session), _user: User = De
     results.sort(key=lambda x: x["score"], reverse=True)
     return {"agents": results, "total": len(results)}
 
-# 5. CALL RECORDING AUDIO PROXY (Generates real WAV audio stream on-the-fly)
+# 5. CALL RECORDING AUDIO PROXY
 @app.get("/api/v1/recordings/{filename}")
 def get_call_audio(filename: str, _user: User = Depends(get_current_user)):
+    # No real recording storage is wired up yet (no XTEND file share / object
+    # store configured). Serving a synthesized placeholder tone as if it were
+    # the real call recording is only acceptable for demos/dev/CI — a real
+    # deployment must not present fabricated audio as an actual recording.
+    if settings.IS_PRODUCTION:
+        raise HTTPException(status_code=503, detail="Call recording storage is not configured for this environment.")
     sample_rate = 8000
     duration_secs = 3.0
     num_samples = int(sample_rate * duration_secs)
@@ -1371,8 +1396,13 @@ def get_call_audio(filename: str, _user: User = Depends(get_current_user)):
     return Response(content=buffer.read(), media_type="audio/wav")
 
 # 6. HIS (HOSPITAL INFORMATION SYSTEM) INTEGRATIONS
+# No real Kranium HIS connector is wired up yet (see README). These endpoints
+# return simulated data for demos/dev/CI only — a real deployment must not
+# present fabricated slots/patients as if they came from the real HIS.
 @app.get("/api/v1/his/slots")
 def get_his_available_slots(doctorName: Optional[str] = None, branchCode: Optional[str] = None, _user: User = Depends(get_current_user)):
+    if settings.IS_PRODUCTION:
+        raise HTTPException(status_code=503, detail="HIS slot integration is not configured for this environment.")
     slots = [
         {"slotTime": "09:30 AM", "status": "AVAILABLE", "doctorName": doctorName or "Dr. S. Prashanth", "room": "OPD-101"},
         {"slotTime": "10:30 AM", "status": "AVAILABLE", "doctorName": doctorName or "Dr. S. Prashanth", "room": "OPD-101"},
@@ -1443,12 +1473,34 @@ def his_prebook_surgery(payload: HISPrebookSurgerySchema, db: Session = Depends(
 
 @app.get("/api/v1/his/patient-search")
 def his_patient_search(search: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
-    records = [
-        {"uhid": "PH-UHID-2026-8801", "patientName": "Karthik Raja", "phone": "+91 98401 54321", "gender": "Male", "age": 48, "bloodGroup": "O+ve", "lastVisit": "2026-07-20"},
-        {"uhid": "PH-UHID-2026-8802", "patientName": "Meenakshi Sundaram", "phone": "+91 94440 12890", "gender": "Female", "age": 34, "bloodGroup": "B+ve", "lastVisit": "2026-07-28"},
-        {"uhid": "PH-UHID-2026-8803", "patientName": "Subramanian V.", "phone": "+91 98840 98765", "gender": "Male", "age": 62, "bloodGroup": "A+ve", "lastVisit": "2026-07-15"},
+    if settings.IS_PRODUCTION:
+        raise HTTPException(status_code=503, detail="HIS patient search is not configured for this environment.")
+    # No real HIS EMR registry to query yet — search our own already-collected
+    # enquiry records instead of returning a fixed fake patient list, so this
+    # at least reflects real (demo/dev) data rather than fabricated records.
+    q = f"%{search.lower()}%"
+    rows = (
+        db.query(Enquiry)
+        .filter(
+            func.lower(Enquiry.patient_name).like(q)
+            | Enquiry.phone.like(f"%{search}%")
+            | func.lower(func.coalesce(Enquiry.patient_uhid, "")).like(q)
+        )
+        .order_by(Enquiry.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    matched = [
+        {
+            "uhid": e.patient_uhid or "UHID-PENDING",
+            "patientName": e.patient_name,
+            "phone": e.phone,
+            "gender": e.gender,
+            "age": e.age,
+            "lastVisit": e.created_at.strftime("%Y-%m-%d") if e.created_at else None,
+        }
+        for e in rows
     ]
-    matched = [r for r in records if search.lower() in r["patientName"].lower() or search in r["phone"] or search.lower() in r["uhid"].lower()]
     return {"results": matched, "total": len(matched)}
 
 # 7. NOTIFICATIONS & REPORT EXPORTS ENGINE
@@ -1541,7 +1593,9 @@ def export_summary_report(db: Session = Depends(get_db_session), _user: User = D
     slms_count = db.query(SLM).count()
     sla_breaches = db.query(Enquiry).filter(Enquiry.sla_breached == True).count()
     his_synced = db.query(Enquiry).filter(Enquiry.his_sync_status == "SYNCED").count()
-    
+    converted = db.query(Enquiry).filter(Enquiry.status.in_(["SURGERY_FIXED", "APPOINTMENT_CONFIRMED", "CONVERTED", "CLOSED"])).count()
+    conversion_rate = f"{round((converted / total_enquiries) * 100, 1)}%" if total_enquiries else "0%"
+
     return {
         "reportTitle": "Prashanth Hospitals Call Center & SLM Platform Executive Summary",
         "generatedAt": datetime.utcnow().isoformat() + "Z",
@@ -1550,7 +1604,7 @@ def export_summary_report(db: Session = Depends(get_db_session), _user: User = D
         "activeSlmRoster": slms_count,
         "slaBreaches": sla_breaches,
         "hisSyncedBookings": his_synced,
-        "overallConversionRate": "68.5%"
+        "overallConversionRate": conversion_rate
     }
 
 if __name__ == "__main__":

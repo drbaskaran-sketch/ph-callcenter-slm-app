@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { PRASHANTH_BRANCHES } from '../data/mockData';
 import { Building2, MapPin, Clock, Activity, PlusCircle, Trash2, X, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch, API_BASE } from '../api';
 
 export default function BranchMatrix() {
-  const [branches, setBranches] = useState(PRASHANTH_BRANCHES);
+  const [branches, setBranches] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [newCode, setNewCode] = useState('');
@@ -21,9 +20,12 @@ export default function BranchMatrix() {
       if (res.ok) {
         const data = await res.json();
         if (data.branches) setBranches(data.branches);
+        setErrorMsg('');
+      } else {
+        setErrorMsg('Unable to load branches from the server.');
       }
     } catch (e) {
-      console.log('Using local branch data fallback');
+      setErrorMsg('Unable to reach the backend API.');
     }
   };
 
@@ -67,35 +69,29 @@ export default function BranchMatrix() {
         setErrorMsg(err.detail || 'Failed to add branch');
       }
     } catch (err) {
-      // Local fallback addition
-      const b = {
-        id: `b${branches.length + 1}`,
-        code: newCode.toUpperCase(),
-        name: newName,
-        city: newCity,
-        type: newType,
-        status: newStatus,
-        leadsToday: 0
-      };
-      setBranches(prev => [...prev, b]);
-      setSuccessMsg(`Branch ${b.name} added locally!`);
-      setTimeout(() => {
-        setShowAddModal(false);
-        setSuccessMsg('');
-        setNewCode('');
-        setNewName('');
-        setNewCity('');
-      }, 1200);
+      // A failed request must surface as an error, not silently pretend the
+      // branch was saved — a local-only "success" here would mislead an
+      // admin into thinking a real hospital branch exists when it doesn't.
+      setErrorMsg('Unable to reach the backend API. The branch was not saved — please try again.');
     }
   };
 
   const handleDeleteBranch = async (idToDelete, branchName) => {
     try {
-      await apiFetch(`${API_BASE}/branches/${idToDelete}`, {
+      const res = await apiFetch(`${API_BASE}/branches/${idToDelete}`, {
         method: 'DELETE'
       });
+      if (!res.ok) {
+        setDeleteConfirmId(null);
+        setErrorMsg(`Failed to delete branch ${branchName}.`);
+        setTimeout(() => setErrorMsg(''), 3000);
+        return;
+      }
     } catch (e) {
-      console.log('Local branch delete fallback');
+      setDeleteConfirmId(null);
+      setErrorMsg('Unable to reach the backend API. The branch was not deleted.');
+      setTimeout(() => setErrorMsg(''), 3000);
+      return;
     }
 
     setBranches(prev => prev.filter(b => b.id !== idToDelete));
@@ -136,6 +132,13 @@ export default function BranchMatrix() {
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-xl font-bold flex items-center gap-2 shadow-xs">
           <CheckCircle2 className="w-4 h-4 text-emerald-600" />
           <span>{successMsg}</span>
+        </div>
+      )}
+
+      {errorMsg && !showAddModal && (
+        <div className="bg-red-50 border border-red-200 text-red-800 text-xs p-3 rounded-xl font-bold flex items-center gap-2 shadow-xs">
+          <AlertTriangle className="w-4 h-4 text-red-600" />
+          <span>{errorMsg}</span>
         </div>
       )}
 
