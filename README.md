@@ -89,3 +89,7 @@ uvicorn app.main:app --reload
 ---
 
 *Developed for Prashanth Hospitals Leadership, Operations, and IT Teams.*
+
+Production operators must follow [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The
+current XTEND, HIS, FCM, SMS, and WhatsApp endpoints are simulation adapters and
+require vendor connectors before they can be considered live integrations.

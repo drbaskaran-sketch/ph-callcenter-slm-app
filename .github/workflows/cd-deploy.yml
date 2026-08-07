@@ -43,7 +43,7 @@ jobs:
             docker image prune -f
             
             echo "5️⃣  Verifying Production Server Health..."
-            curl -f http://localhost:8000/ || exit 1
+            curl -f http://localhost:5173/health || exit 1
             curl -f http://localhost:5173/ || exit 1
             
             echo "=========================================================================="

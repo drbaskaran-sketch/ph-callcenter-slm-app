@@ -30,6 +30,9 @@ export default function App() {
     return <Login onLogin={setUser} />;
   }
 
+  const isAdmin = user.role === 'ADMIN';
+  const isLeadership = isAdmin || user.role === 'SUPERVISOR';
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between">
       <div>
@@ -37,11 +40,11 @@ export default function App() {
 
         <main className="pb-12 pt-4">
           {activeTab === 'simulator' && <SLMMobileSimulator />}
-          {activeTab === 'dashboard' && <LeadershipDashboard />}
-          {activeTab === 'branches' && <BranchMatrix />}
-          {activeTab === 'users' && <UserManagement />}
-          {activeTab === 'sla' && <SLAGovernanceDashboard />}
-          {activeTab === 'reports' && <NotificationsAndReports />}
+          {activeTab === 'dashboard' && isLeadership && <LeadershipDashboard />}
+          {activeTab === 'branches' && isAdmin && <BranchMatrix />}
+          {activeTab === 'users' && isAdmin && <UserManagement />}
+          {activeTab === 'sla' && isLeadership && <SLAGovernanceDashboard />}
+          {activeTab === 'reports' && isLeadership && <NotificationsAndReports />}
         </main>
       </div>
 

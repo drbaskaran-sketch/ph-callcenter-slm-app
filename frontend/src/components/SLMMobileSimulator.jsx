@@ -209,14 +209,18 @@ export default function SLMMobileSimulator() {
   };
 
   // Handle Audio Playback with live stream proxy
-  const toggleAudioPlayback = () => {
+  const toggleAudioPlayback = async () => {
     if (!isPlaying) {
       registerNewAction(`Call recording stream played by SLM`, selectedEnquiry?.assignedSLM || 'SLM Agent');
       const audioFileName = selectedEnquiry?.recordingUrl || selectedEnquiry?.recording_path || 'wav_8801.wav';
-      const audioUrl = `${API_BASE}/audio/${audioFileName}`;
+      const audioUrl = `${API_BASE}/recordings/${encodeURIComponent(audioFileName)}`;
       
       try {
-        const audioObj = new Audio(audioUrl);
+        const response = await apiFetch(audioUrl);
+        if (!response.ok) throw new Error('Recording unavailable');
+        const objectUrl = URL.createObjectURL(await response.blob());
+        const audioObj = new Audio(objectUrl);
+        audioObj.addEventListener('ended', () => URL.revokeObjectURL(objectUrl), { once: true });
         audioObj.play().catch(() => {
           // Fallback Web Audio API synth if browser blocks autoplay or format unsupported
           const audioCtx = new (window.AudioContext || window.webkitAudioContext)();

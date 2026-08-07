@@ -35,6 +35,7 @@ class Settings:
     ADMIN_USERNAME: str = os.getenv("ADMIN_USERNAME", "admin")
     ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "hxyE7C!roFnMGIsaH1xT")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
+    SEED_DEMO_DATA: bool = os.getenv("SEED_DEMO_DATA", "true").lower() == "true"
     
     # Database Configuration & Pool Parameters
     DATABASE_URL: str = os.getenv(
@@ -63,4 +64,19 @@ class Settings:
         for origin in os.getenv("CORS_ORIGINS", "*").split(",")
     ]
 
+    def validate(self) -> None:
+        """Refuse an insecure production boot instead of accepting demo defaults."""
+        if self.APP_ENV.lower() != "production":
+            return
+        unsafe = []
+        if len(self.SECRET_KEY) < 32 or "change" in self.SECRET_KEY.lower() or "replace" in self.SECRET_KEY.lower():
+            unsafe.append("SECRET_KEY")
+        if len(self.ADMIN_PASSWORD) < 12 or "change" in self.ADMIN_PASSWORD.lower() or "replace" in self.ADMIN_PASSWORD.lower():
+            unsafe.append("ADMIN_PASSWORD")
+        if "*" in self.CORS_ORIGINS:
+            unsafe.append("CORS_ORIGINS")
+        if unsafe:
+            raise RuntimeError("Unsafe production configuration: " + ", ".join(unsafe))
+
 settings = Settings()
+settings.validate()

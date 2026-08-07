@@ -24,15 +24,13 @@ class ProductionDatabaseManager:
         self.Base = declarative_base()
 
     def _create_pooled_engine(self):
-        try:
-            if self.db_url.startswith("sqlite"):
-                return create_engine(
+        if self.db_url.startswith("sqlite"):
+            return create_engine(
                     self.db_url,
                     connect_args={"check_same_thread": False},
                     poolclass=StaticPool
                 )
-            else:
-                return create_engine(
+        return create_engine(
                     self.db_url,
                     poolclass=QueuePool,
                     pool_size=POOL_SIZE,
@@ -41,13 +39,6 @@ class ProductionDatabaseManager:
                     pool_recycle=POOL_RECYCLE,
                     pool_pre_ping=True
                 )
-        except Exception as e:
-            print(f"⚠️ Production DB pool initialization warning: {e}. Falling back to SQLite memory pool.")
-            return create_engine(
-                "sqlite:///:memory:",
-                connect_args={"check_same_thread": False},
-                poolclass=StaticPool
-            )
 
     def get_pool_status(self):
         """Returns live connection pool utilization metrics"""

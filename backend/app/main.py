@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Query, Response, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import Callable, List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -351,9 +351,36 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid authentication token.")
 
     user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User no longer exists.")
+    if not user or user.status != "ACTIVE":
+        raise HTTPException(status_code=401, detail="User account is inactive or no longer exists.")
     return user
+
+
+def require_roles(*allowed_roles: str) -> Callable:
+    allowed = {role.upper() for role in allowed_roles}
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        if (user.role or "").upper() not in allowed:
+            raise HTTPException(status_code=403, detail="You do not have permission to perform this action.")
+        return user
+    return dependency
+
+
+def scoped_enquiry_query(db: Session, user: "User"):
+    query = db.query(Enquiry)
+    role = (user.role or "").upper()
+    if role == "SLM":
+        return query.filter(Enquiry.slm_id == user.slm_id) if user.slm_id else query.filter(text("1 = 0"))
+    if role == "BRANCH_HEAD":
+        return (query.filter(func.upper(Enquiry.branch_code) == user.branch_code.upper())
+                if user.branch_code and user.branch_code != "ALL" else query.filter(text("1 = 0")))
+    return query
+
+
+def get_accessible_enquiry(db: Session, user: "User", enquiry_id: str) -> "Enquiry":
+    enq = scoped_enquiry_query(db, user).filter(Enquiry.id == enquiry_id).first()
+    if not enq:
+        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+    return enq
 
 
 class LoginSchema(BaseModel):
@@ -379,6 +406,8 @@ def login(payload: LoginSchema, db: Session = Depends(get_db_session)):
     user = db.query(User).filter(User.username == payload.username).first()
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password.")
+    if user.status != "ACTIVE":
+        raise HTTPException(status_code=403, detail="User account is inactive.")
     token = create_access_token(user.username)
     return {
         "access_token": token,
@@ -532,7 +561,7 @@ def init_db():
             else:
                 print(f"✅ Seeded admin user '{settings.ADMIN_USERNAME}' into PostgreSQL.")
 
-        if db.query(Branch).count() == 0:
+        if settings.SEED_DEMO_DATA and db.query(Branch).count() == 0:
             for seed in SEED_BRANCHES:
                 db.add(Branch(
                     id=seed["id"], code=seed["code"], name=seed["name"], city=seed["city"],
@@ -541,7 +570,7 @@ def init_db():
             db.commit()
             print(f"✅ Seeded {len(SEED_BRANCHES)} initial branches into PostgreSQL.")
 
-        if db.query(SLM).count() == 0:
+        if settings.SEED_DEMO_DATA and db.query(SLM).count() == 0:
             for seed in SEED_SLMS:
                 db.add(SLM(
                     id=seed["id"], name=seed["name"], department=seed["department"],
@@ -552,7 +581,7 @@ def init_db():
             db.commit()
             print(f"✅ Seeded {len(SEED_SLMS)} initial SLMs into PostgreSQL.")
 
-        if db.query(Enquiry).count() == 0:
+        if settings.SEED_DEMO_DATA and db.query(Enquiry).count() == 0:
             for seed in SEED_ENQUIRIES:
                 created_at = datetime.utcnow() - timedelta(minutes=seed["age_offset_mins"])
                 enq = Enquiry(
@@ -603,19 +632,22 @@ def init_db():
 # --- API ENDPOINTS ---
 
 @app.get("/health", include_in_schema=False)
-async def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db_session)):
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    return {"status": "ok", "database": "ok"}
 
 @app.get("/")
-def read_root(db: Session = Depends(get_db_session)):
+def read_root():
     return {
         "organization": "Prashanth Hospitals",
         "tagline": "WE CARE FOR U",
         "service": "Call Center & SLM Mobile Platform API",
         "version": "1.1.0",
         "status": "Operational",
-        "xtendDb2Hub": "Kolathur Call Center Central Hub",
-        "activeEnquiriesCount": db.query(Enquiry).count()
+        "xtendDb2Hub": "Kolathur Call Center Central Hub"
     }
 
 # 1. BRANCHES (PostgreSQL-backed — see models.Branch)
@@ -629,7 +661,7 @@ def get_branches(db: Session = Depends(get_db_session), _user: User = Depends(ge
     return {"branches": [serialize_branch(b) for b in branches], "total": len(branches)}
 
 @app.post("/api/v1/branches")
-def create_branch(payload: BranchCreateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def create_branch(payload: BranchCreateSchema, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
     if db.query(Branch).filter(func.upper(Branch.code) == payload.code.upper()).first():
         raise HTTPException(status_code=400, detail=f"Branch code {payload.code} already exists.")
 
@@ -656,7 +688,7 @@ def create_branch(payload: BranchCreateSchema, db: Session = Depends(get_db_sess
     return {"message": "Branch created successfully", "branch": serialize_branch(new_branch)}
 
 @app.delete("/api/v1/branches/{branch_id}")
-def delete_branch(branch_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def delete_branch(branch_id: str, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
     branch = db.query(Branch).filter(
         (Branch.id == branch_id) | (func.upper(Branch.code) == branch_id.upper())
     ).first()
@@ -669,12 +701,14 @@ def delete_branch(branch_id: str, db: Session = Depends(get_db_session), _user: 
 
 # 2. USER & PERMISSION MANAGEMENT (PostgreSQL-backed — see models.User)
 @app.get("/api/v1/users")
-def get_users(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def get_users(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
     users = db.query(User).order_by(User.id).all()
     return {"users": [serialize_user(u) for u in users], "total": len(users)}
 
 @app.post("/api/v1/users", status_code=status.HTTP_201_CREATED)
-def create_user(payload: UserCreateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def create_user(payload: UserCreateSchema, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
+    if len(payload.password) < 12:
+        raise HTTPException(status_code=400, detail="Password must be at least 12 characters long.")
     existing = db.query(User).filter(User.username == payload.username).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Username '{payload.username}' is already taken.")
@@ -696,7 +730,7 @@ def create_user(payload: UserCreateSchema, db: Session = Depends(get_db_session)
     return {"message": "User account created successfully", "user": serialize_user(new_user)}
 
 @app.put("/api/v1/users/{user_id}")
-def update_user(user_id: int, payload: UserUpdateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def update_user(user_id: int, payload: UserUpdateSchema, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
     target_user = db.query(User).filter(User.id == user_id).first()
     if not target_user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
@@ -719,20 +753,20 @@ def update_user(user_id: int, payload: UserUpdateSchema, db: Session = Depends(g
     return {"message": "User updated successfully", "user": serialize_user(target_user)}
 
 @app.post("/api/v1/users/{user_id}/reset-password")
-def reset_user_password(user_id: int, payload: UserPasswordResetSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def reset_user_password(user_id: int, payload: UserPasswordResetSchema, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
     target_user = db.query(User).filter(User.id == user_id).first()
     if not target_user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
     
-    if not payload.newPassword or len(payload.newPassword.strip()) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long.")
+    if not payload.newPassword or len(payload.newPassword.strip()) < 12:
+        raise HTTPException(status_code=400, detail="Password must be at least 12 characters long.")
     
     target_user.password_hash = hash_password(payload.newPassword)
     db.commit()
     return {"message": f"Password reset successfully for user {target_user.username}"}
 
 @app.delete("/api/v1/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def delete_user(user_id: int, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
     target_user = db.query(User).filter(User.id == user_id).first()
     if not target_user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
@@ -751,7 +785,7 @@ def get_slms(db: Session = Depends(get_db_session), _user: User = Depends(get_cu
     return {"slms": [serialize_slm(s) for s in slms], "total": len(slms)}
 
 @app.post("/api/v1/slms", status_code=status.HTTP_201_CREATED)
-def create_slm(payload: SLMCreateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def create_slm(payload: SLMCreateSchema, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
     slm_count = db.query(SLM).count()
     new_slm_id = f"slm-{100 + slm_count + 1}"
     
@@ -794,7 +828,7 @@ def create_slm(payload: SLMCreateSchema, db: Session = Depends(get_db_session), 
     }
 
 @app.put("/api/v1/slms/{slm_id}")
-def update_slm(slm_id: str, payload: SLMUpdateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def update_slm(slm_id: str, payload: SLMUpdateSchema, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
     slm_row = db.query(SLM).filter(SLM.id == slm_id).first()
     if not slm_row:
         raise HTTPException(status_code=404, detail=f"SLM {slm_id} not found.")
@@ -817,7 +851,7 @@ def update_slm(slm_id: str, payload: SLMUpdateSchema, db: Session = Depends(get_
     return {"message": "SLM updated successfully", "slm": serialize_slm(slm_row)}
 
 @app.delete("/api/v1/slms/{slm_id}")
-def delete_slm(slm_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def delete_slm(slm_id: str, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN"))):
     slm_row = db.query(SLM).filter(SLM.id == slm_id).first()
     if not slm_row:
         raise HTTPException(status_code=404, detail=f"SLM {slm_id} not found.")
@@ -836,7 +870,7 @@ def get_enquiries(
     db: Session = Depends(get_db_session),
     _user: User = Depends(get_current_user)
 ):
-    query = db.query(Enquiry)
+    query = scoped_enquiry_query(db, _user)
     if branchCode:
         query = query.filter(func.upper(Enquiry.branch_code) == branchCode.upper())
     if status:
@@ -855,13 +889,11 @@ def get_enquiries(
 
 @app.get("/api/v1/enquiries/{enquiry_id}")
 def get_enquiry_by_id(enquiry_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
-    enq = db.query(Enquiry).filter(Enquiry.id == enquiry_id).first()
-    if not enq:
-        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+    enq = get_accessible_enquiry(db, _user, enquiry_id)
     return {"enquiry": serialize_enquiry(enq)}
 
 @app.post("/api/v1/enquiries", status_code=status.HTTP_201_CREATED)
-def create_enquiry(payload: EnquiryCreate, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def create_enquiry(payload: EnquiryCreate, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     # Mandatory Remarks Check when status is CLOSED or CONVERTED
     if payload.status in ["CLOSED", "CONVERTED"] and not payload.remarks:
         raise HTTPException(
@@ -922,7 +954,7 @@ def create_enquiry(payload: EnquiryCreate, db: Session = Depends(get_db_session)
     return {"message": "Enquiry created successfully", "enquiry": serialize_enquiry(new_enquiry)}
 
 @app.post("/api/v1/xtend/simulate-call")
-def simulate_xtend_call(payload: XtendCallSimulationSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def simulate_xtend_call(payload: XtendCallSimulationSchema, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     branch_code = payload.selectedBranchCode or random.choice(["KOL", "CHP", "VEL", "GUM", "IVF"])
     branch_row = db.query(Branch).filter(Branch.code == branch_code).first()
     matched_branch = branch_row.name if branch_row else "Kolathur (Call Center Hub)"
@@ -996,9 +1028,7 @@ def simulate_xtend_call(payload: XtendCallSimulationSchema, db: Session = Depend
 
 @app.patch("/api/v1/enquiries/{enquiry_id}")
 def update_enquiry(enquiry_id: str, payload: EnquiryUpdateSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
-    enq = db.query(Enquiry).filter(Enquiry.id == enquiry_id).first()
-    if not enq:
-        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+    enq = get_accessible_enquiry(db, _user, enquiry_id)
 
     now = datetime.utcnow()
     performed_by = payload.assignedSLM or enq.assigned_slm
@@ -1029,6 +1059,8 @@ def update_enquiry(enquiry_id: str, payload: EnquiryUpdateSchema, db: Session = 
     if payload.nextFollowup:
         enq.next_followup = payload.nextFollowup
     if payload.assignedSLM:
+        if (_user.role or "").upper() not in {"ADMIN", "SUPERVISOR"}:
+            raise HTTPException(status_code=403, detail="Only administrators and supervisors can reassign enquiries.")
         enq.assigned_slm = payload.assignedSLM
         log_action(db, enquiry_id, f"Reassigned to {payload.assignedSLM}", performed_by, now)
 
@@ -1044,22 +1076,18 @@ def add_enquiry_action(
     db: Session = Depends(get_db_session),
     _user: User = Depends(get_current_user)
 ):
-    enq = db.query(Enquiry).filter(Enquiry.id == enquiry_id).first()
-    if not enq:
-        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+    enq = get_accessible_enquiry(db, _user, enquiry_id)
 
     now = datetime.utcnow()
-    performed_by = payload.performedBy or enq.assigned_slm or "SLM Agent"
+    performed_by = _user.username
     log_action(db, enquiry_id, payload.action, performed_by, now)
     db.commit()
     db.refresh(enq)
     return {"message": "Action logged successfully", "enquiry": serialize_enquiry(enq)}
 
 @app.post("/api/v1/enquiries/{enquiry_id}/simulate-escalation")
-def simulate_enquiry_escalation(enquiry_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
-    enq = db.query(Enquiry).filter(Enquiry.id == enquiry_id).first()
-    if not enq:
-        raise HTTPException(status_code=404, detail=f"Enquiry {enquiry_id} not found")
+def simulate_enquiry_escalation(enquiry_id: str, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
+    enq = get_accessible_enquiry(db, _user, enquiry_id)
     enq.sla_breached = True
     enq.escalated_to_branch_head = True
     enq.updated_at = datetime.utcnow()
@@ -1069,7 +1097,7 @@ def simulate_enquiry_escalation(enquiry_id: str, db: Session = Depends(get_db_se
     return {"message": f"Simulated SLA breach & escalation for Enquiry {enquiry_id}", "enquiry": serialize_enquiry(enq)}
 
 @app.post("/api/v1/sla/check-breaches")
-def check_sla_breaches(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def check_sla_breaches(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     now = datetime.utcnow()
     active_enquiries = db.query(Enquiry).filter(Enquiry.status.in_(["NEW", "ASSIGNED"])).all()
     
@@ -1102,7 +1130,7 @@ def check_sla_breaches(db: Session = Depends(get_db_session), _user: User = Depe
     }
 
 @app.get("/api/v1/sla/matrix")
-def get_sla_matrix(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def get_sla_matrix(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     now = datetime.utcnow()
     all_enquiries = db.query(Enquiry).all()
     
@@ -1132,7 +1160,7 @@ def get_sla_matrix(db: Session = Depends(get_db_session), _user: User = Depends(
     }
 
 @app.get("/api/v1/sla/scorecard")
-def get_sla_scorecard(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def get_sla_scorecard(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     slms = db.query(SLM).all()
     enquiries = db.query(Enquiry).all()
     
@@ -1183,7 +1211,7 @@ def get_sla_scorecard(db: Session = Depends(get_db_session), _user: User = Depen
 
 # 4. LEADERSHIP ANALYTICS
 @app.get("/api/v1/analytics/overview")
-def get_analytics_overview(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def get_analytics_overview(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     total_inquiries = 457
     avg_tat = 9.2
     surgeries = 127
@@ -1201,7 +1229,7 @@ def get_analytics_overview(db: Session = Depends(get_db_session), _user: User = 
     }
 
 @app.get("/api/v1/analytics/specialities")
-def get_analytics_specialities(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def get_analytics_specialities(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     departments = ["Cardiology", "IVF & Fertility", "Orthopedics", "Obstetrics & Gynecology", "Nephrology & Urology", "Neurology", "General Surgery"]
     enquiries = db.query(Enquiry).all()
     
@@ -1246,7 +1274,7 @@ def get_analytics_specialities(db: Session = Depends(get_db_session), _user: Use
 
 
 @app.get("/api/v1/analytics/doctors")
-def get_analytics_doctors(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def get_analytics_doctors(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     enquiries = db.query(Enquiry).all()
     
     doc_map = {}
@@ -1277,7 +1305,7 @@ def get_analytics_doctors(db: Session = Depends(get_db_session), _user: User = D
 
 
 @app.get("/api/v1/analytics/agents")
-def get_analytics_agents(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def get_analytics_agents(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     slms = db.query(SLM).all()
     enquiries = db.query(Enquiry).all()
     
@@ -1357,9 +1385,7 @@ def get_his_available_slots(doctorName: Optional[str] = None, branchCode: Option
 
 @app.post("/api/v1/his/book-appointment")
 def his_book_appointment(payload: HISBookSlotSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
-    enq = db.query(Enquiry).filter(Enquiry.id == payload.enquiryId).first()
-    if not enq:
-        raise HTTPException(status_code=404, detail=f"Enquiry {payload.enquiryId} not found")
+    enq = get_accessible_enquiry(db, _user, payload.enquiryId)
     
     now = datetime.utcnow()
     his_booking_id = f"HIS-OPD-{random.randint(8000, 9999)}"
@@ -1388,9 +1414,7 @@ def his_book_appointment(payload: HISBookSlotSchema, db: Session = Depends(get_d
 
 @app.post("/api/v1/his/prebook-surgery")
 def his_prebook_surgery(payload: HISPrebookSurgerySchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
-    enq = db.query(Enquiry).filter(Enquiry.id == payload.enquiryId).first()
-    if not enq:
-        raise HTTPException(status_code=404, detail=f"Enquiry {payload.enquiryId} not found")
+    enq = get_accessible_enquiry(db, _user, payload.enquiryId)
     
     now = datetime.utcnow()
     his_ot_booking = f"HIS-OT-{random.randint(7000, 8999)}"
@@ -1454,9 +1478,7 @@ def get_notification_templates(_user: User = Depends(get_current_user)):
 
 @app.post("/api/v1/notifications/send")
 def send_notification(payload: NotificationDispatchSchema, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
-    enq = db.query(Enquiry).filter(Enquiry.id == payload.enquiryId).first()
-    if not enq:
-        raise HTTPException(status_code=404, detail=f"Enquiry {payload.enquiryId} not found")
+    enq = get_accessible_enquiry(db, _user, payload.enquiryId)
 
     now = datetime.utcnow()
     patient_name = enq.patient_name
@@ -1484,7 +1506,7 @@ def send_notification(payload: NotificationDispatchSchema, db: Session = Depends
     }
 
 @app.get("/api/v1/reports/export/csv")
-def export_csv_report(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def export_csv_report(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     enquiries = db.query(Enquiry).order_by(Enquiry.created_at.desc()).all()
     
     output = io.StringIO()
@@ -1513,7 +1535,7 @@ def export_csv_report(db: Session = Depends(get_db_session), _user: User = Depen
     )
 
 @app.get("/api/v1/reports/export/summary")
-def export_summary_report(db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def export_summary_report(db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
     total_enquiries = db.query(Enquiry).count()
     branches_count = db.query(Branch).count()
     slms_count = db.query(SLM).count()
