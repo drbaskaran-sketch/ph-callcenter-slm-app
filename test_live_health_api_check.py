@@ -1,6 +1,7 @@
 import urllib.request
 import json
 import time
+import os
 from test_auth_helper import install_auth_opener
 
 def log(msg, status="INFO"):
@@ -8,8 +9,8 @@ def log(msg, status="INFO"):
     print(f"{symbol} [{status}] {msg}")
 
 def main():
-    base_backend = "http://localhost:8000"
-    base_frontend = "http://localhost:5173"
+    base_backend = os.environ.get("BASE_URL", "http://localhost:9000")
+    base_frontend = os.environ.get("FRONTEND_URL", "http://localhost:9001")
     install_auth_opener(base_backend)
 
     print("=" * 80)

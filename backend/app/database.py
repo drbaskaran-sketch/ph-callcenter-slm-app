@@ -64,10 +64,20 @@ class ProductionDatabaseManager:
                 "status": "Healthy (Static Test Pool)"
             }
 
+REPLICA_DATABASE_URL = settings.REPLICA_DATABASE_URL
+replica_db_manager = ProductionDatabaseManager(REPLICA_DATABASE_URL)
+
 db_manager = ProductionDatabaseManager()
 
 def get_db_session():
     db = db_manager.SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_replica_db_session():
+    db = replica_db_manager.SessionLocal()
     try:
         yield db
     finally:

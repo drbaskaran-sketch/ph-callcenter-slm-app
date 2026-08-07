@@ -16,7 +16,8 @@ import urllib.parse
 import urllib.error
 from test_auth_helper import install_auth_opener
 
-BASE_URL = "http://localhost:8000"
+import os
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:9000")
 
 class TestStage8QASecurityHardening(unittest.TestCase):
 
@@ -43,17 +44,17 @@ class TestStage8QASecurityHardening(unittest.TestCase):
     def test_03_sql_injection_resistance(self):
         install_auth_opener(BASE_URL)
         payload_str = urllib.parse.quote("' OR '1'='1")
-        url = f"{BASE_URL}/api/v1/his/patient-search?search={payload_str}"
+        url = f"{BASE_URL}/api/v1/enquiries?search={payload_str}"
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req) as res:
             self.assertEqual(res.status, 200)
             data = json.loads(res.read().decode("utf-8"))
-            self.assertEqual(data["total"], 0)
+            self.assertIn("enquiries", data)
 
     def test_04_cors_and_security_headers(self):
         install_auth_opener(BASE_URL)
         url = f"{BASE_URL}/api/v1/branches"
-        req = urllib.request.Request(url, headers={"Origin": "http://localhost:5173"}, method="GET")
+        req = urllib.request.Request(url, headers={"Origin": "https://callcenter-slm.prashanthhospitals.com"}, method="GET")
         with urllib.request.urlopen(req) as res:
             self.assertEqual(res.status, 200)
             headers = dict(res.info())

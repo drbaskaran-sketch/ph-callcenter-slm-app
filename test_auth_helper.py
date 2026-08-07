@@ -15,7 +15,16 @@ DEFAULT_USERNAME = os.environ.get("PH_TEST_USERNAME", "admin")
 DEFAULT_PASSWORD = os.environ.get("PH_TEST_PASSWORD", "hxyE7C!roFnMGIsaH1xT")
 
 
-def install_auth_opener(base_url="http://localhost:8000", username=None, password=None):
+def install_auth_opener(base_url=None, username=None, password=None):
+    if base_url is None:
+        base_url = os.environ.get("BASE_URL", "http://localhost:9000")
+        try:
+            req = urllib.request.Request(f"{base_url}/health")
+            with urllib.request.urlopen(req, timeout=1):
+                pass
+        except Exception:
+            base_url = os.environ.get("BASE_URL", "http://localhost:8000")
+
     username = username or DEFAULT_USERNAME
     password = password or DEFAULT_PASSWORD
 

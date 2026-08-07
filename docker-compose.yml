@@ -30,8 +30,10 @@ services:
       dockerfile: backend/Dockerfile
     container_name: ph-backend
     restart: unless-stopped
-    expose:
-      - "8000"
+    ports:
+      - "9000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
     environment:
@@ -59,7 +61,7 @@ services:
     container_name: ph-frontend
     restart: unless-stopped
     ports:
-      - "5173:80"
+      - "9001:80"
     depends_on:
       ph-backend:
         condition: service_healthy

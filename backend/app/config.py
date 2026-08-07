@@ -42,6 +42,10 @@ class Settings:
         "DATABASE_URL",
         "postgresql+psycopg2://ph_db_user:ph_secure_pass@localhost:5432/ph_callcenter_slm_db"
     )
+    REPLICA_DATABASE_URL: str = os.getenv(
+        "REPLICA_DATABASE_URL",
+        "postgresql+psycopg2://xtend_sync:xtend_sync_pass@host.docker.internal:5432/xtend_replica"
+    )
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "30"))
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))

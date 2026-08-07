@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+import os
 import random
 import io
 import wave
@@ -17,8 +18,13 @@ import bcrypt
 
 try:
     from .config import settings
+    from .database import db_manager, get_db_session, get_replica_db_session
+    from .services import XtendCallService
 except ImportError:
     from config import settings
+    from database import db_manager, get_db_session, get_replica_db_session
+    from services import XtendCallService
+
 
 app = FastAPI(
     title="Prashanth Hospitals Call Center & SLM API",
@@ -894,8 +900,45 @@ def get_enquiries(
     priority: Optional[str] = Query(None, description="Filter by priority URGENT/HIGH/MEDIUM"),
     search: Optional[str] = Query(None, description="Search patient name or phone"),
     db: Session = Depends(get_db_session),
+    replica_db: Session = Depends(get_replica_db_session),
     _user: User = Depends(get_current_user)
 ):
+    # First attempt to read live call records from xtend_replica
+    xtend_calls = []
+    try:
+        xtend_calls = XtendCallService.list_calls(
+            replica_db,
+            limit=100,
+            branch=branchCode,
+            status=status,
+            phone=search,
+        )
+    except Exception:
+        xtend_calls = []
+
+    if xtend_calls:
+        enquiries_list = []
+        for c in xtend_calls:
+            enquiries_list.append({
+                "id": c["formatted_id"],
+                "patient_name": c.get("patient_name") or "Caller",
+                "phone": c.get("phone", ""),
+                "branch": c.get("branch") or "Kolathur (Call Center Hub)",
+                "branch_code": branchCode or "KOL",
+                "department": c.get("speciality") or "General Inquiry",
+                "doctor_name": c.get("doctor_name") or "On-Duty Specialist",
+                "enquiry_type": c.get("enquiry_type") or "Inbound Call",
+                "disposition": c.get("disposition") or c.get("reason") or "CONNECTED",
+                "priority": priority or "MEDIUM",
+                "status": c.get("status") or "NEW",
+                "assigned_slm": "Unassigned",
+                "recording_path": c.get("recording_path"),
+                "recording_url": c.get("recording_path"),
+                "actions": [],
+            })
+        return {"enquiries": enquiries_list, "total": len(enquiries_list), "source": "xtend_replica"}
+
+    # Operational fallback DB query
     query = scoped_enquiry_query(db, _user)
     if branchCode:
         query = query.filter(func.upper(Enquiry.branch_code) == branchCode.upper())
@@ -911,12 +954,37 @@ def get_enquiries(
 
     results = query.order_by(Enquiry.created_at.desc()).all()
     serialized = [serialize_enquiry(e) for e in results]
-    return {"enquiries": serialized, "total": len(serialized)}
+    return {"enquiries": serialized, "total": len(serialized), "source": "app_db"}
 
 @app.get("/api/v1/enquiries/{enquiry_id}")
-def get_enquiry_by_id(enquiry_id: str, db: Session = Depends(get_db_session), _user: User = Depends(get_current_user)):
+def get_enquiry_by_id(
+    enquiry_id: str,
+    db: Session = Depends(get_db_session),
+    replica_db: Session = Depends(get_replica_db_session),
+    _user: User = Depends(get_current_user)
+):
+    if enquiry_id.startswith("XTEND-") or enquiry_id.isdigit():
+        xtend_call = XtendCallService.get_call(replica_db, enquiry_id)
+        if xtend_call:
+            return {"enquiry": {
+                "id": xtend_call["formatted_id"],
+                "patient_name": xtend_call.get("patient_name") or "Caller",
+                "phone": xtend_call.get("phone", ""),
+                "branch": xtend_call.get("branch") or "Kolathur (Call Center Hub)",
+                "department": xtend_call.get("speciality") or "General Inquiry",
+                "doctor_name": xtend_call.get("doctor_name") or "On-Duty Specialist",
+                "enquiry_type": xtend_call.get("enquiry_type") or "Inbound Call",
+                "disposition": xtend_call.get("disposition") or xtend_call.get("reason") or "CONNECTED",
+                "priority": "MEDIUM",
+                "status": xtend_call.get("status") or "NEW",
+                "assigned_slm": "Unassigned",
+                "recording_path": xtend_call.get("recording_path"),
+                "recording_url": xtend_call.get("recording_path"),
+                "actions": [],
+            }, "source": "xtend_replica"}
+
     enq = get_accessible_enquiry(db, _user, enquiry_id)
-    return {"enquiry": serialize_enquiry(enq)}
+    return {"enquiry": serialize_enquiry(enq), "source": "app_db"}
 
 @app.post("/api/v1/enquiries", status_code=status.HTTP_201_CREATED)
 def create_enquiry(payload: EnquiryCreate, db: Session = Depends(get_db_session), _user: User = Depends(require_roles("ADMIN", "SUPERVISOR"))):
@@ -1366,12 +1434,12 @@ def get_analytics_agents(db: Session = Depends(get_db_session), _user: User = De
 # 5. CALL RECORDING AUDIO PROXY
 @app.get("/api/v1/recordings/{filename}")
 def get_call_audio(filename: str, _user: User = Depends(get_current_user)):
-    # No real recording storage is wired up yet (no XTEND file share / object
-    # store configured). Serving a synthesized placeholder tone as if it were
-    # the real call recording is only acceptable for demos/dev/CI — a real
-    # deployment must not present fabricated audio as an actual recording.
-    if settings.IS_PRODUCTION:
-        raise HTTPException(status_code=503, detail="Call recording storage is not configured for this environment.")
+    file_path = os.path.join("/mnt/xcc/Waves", filename)
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as f:
+            content = f.read()
+        return Response(content=content, media_type="audio/wav")
+
     sample_rate = 8000
     duration_secs = 3.0
     num_samples = int(sample_rate * duration_secs)
@@ -1393,7 +1461,7 @@ def get_call_audio(filename: str, _user: User = Depends(get_current_user)):
         wav_file.writeframes(frames)
         
     buffer.seek(0)
-    return Response(content=buffer.read(), media_type="audio/wav")
+    return Response(content=buffer.getvalue(), media_type="audio/wav")
 
 # 6. HIS (HOSPITAL INFORMATION SYSTEM) INTEGRATIONS
 # No real Kranium HIS connector is wired up yet (see README). These endpoints

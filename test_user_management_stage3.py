@@ -14,7 +14,8 @@ import unittest
 import urllib.request
 from test_auth_helper import install_auth_opener
 
-BASE_URL = "http://localhost:8000"
+import os
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:9000")
 
 class TestStage3UserManagement(unittest.TestCase):
 
